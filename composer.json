@@ -1,4 +1,5 @@
 {
+	"name": "fog/HHRx",
 	"autoload": {
 		"psr-4": {
 			"HHRx\\": "src"
