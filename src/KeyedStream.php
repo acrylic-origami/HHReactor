@@ -11,7 +11,10 @@ class KeyedStream<+Tk, +T> {
 			await \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($val)));
 		}
 	}
-	protected function get_producer(): AsyncKeyedIterator<Tk, T> {
+	public async function get_total_awaitable(): Awaitable<void> {
+		foreach($this->producer await as $_) {}
+	}
+	public function get_producer(): AsyncKeyedIterator<Tk, T> {
 		return $this->producer;
 	}
 	public function subscribe((function(T): Awaitable<void>) $incoming): void {
@@ -26,6 +29,13 @@ class KeyedStream<+Tk, +T> {
 			foreach($incoming->get_producer() await as $k => $v) yield $k => $v;
 		});
 	}
+	public function filter((function(T): bool) $f): KeyedStream<Tk, T> {
+		return new self(async {
+			foreach($this->producer await as $k => $v)
+				if($f($v))
+					yield $k => $v;
+		});
+	}
 	public static function merge_all<Tx, Tr>(KeyedContainer<arraykey, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
 		$producers = (new KC($incoming))->map((KeyedStream<Tx, Tr> $stream) ==> $stream->get_producer())->get_units();
 		invariant(!is_null($producers), 'Impossible condition or implementation error: argument KeyedContainer is not nullable, but is weakened by KC construction.');
@@ -36,5 +46,8 @@ class KeyedStream<+Tk, +T> {
 	}
 	public static function from<Tx, Tv>(KeyedIterable<Tx, Awaitable<Tv>> $incoming): KeyedStream<Tx, Tv> {
 		return new static(async { foreach($incoming as $k => $awaitable) yield $k => await $awaitable; });
+	}
+	public static function empty(): KeyedStream<Tk, T> {
+		return new static(async{});
 	}
 }
