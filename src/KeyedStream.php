@@ -27,7 +27,7 @@ class KeyedStream<+Tk, +T> {
 		return new static(async { 
 			foreach($this->get_producer() await as $k => $v) yield $k => $v;
 			foreach($incoming->get_producer() await as $k => $v) yield $k => $v;
-		});
+		}); // consider self instead of static
 	}
 	public function filter((function(T): bool) $f): KeyedStream<Tk, T> {
 		return new self(async {
@@ -39,15 +39,18 @@ class KeyedStream<+Tk, +T> {
 	public static function merge_all<Tx, Tr>(KeyedContainer<arraykey, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
 		$producers = (new KC($incoming))->map((KeyedStream<Tx, Tr> $stream) ==> $stream->get_producer())->get_units();
 		invariant(!is_null($producers), 'Impossible condition or implementation error: argument KeyedContainer is not nullable, but is weakened by KC construction.');
-		return new static(new AsyncKeyedIteratorPoll($producers));
+		return new static(new AsyncKeyedIteratorPoll($producers)); // consider self rather than static
 	}
 	public static function from_one<Tx, Tv>(Awaitable<Tv> $incoming, ?Tx $key = null): KeyedStream<?Tx, Tv> {
-		return new static(async { yield $key => (await $incoming); });
+		return new static(async { yield $key => (await $incoming); }); // consider self rather than static
 	}
 	public static function from<Tx, Tv>(KeyedIterable<Tx, Awaitable<Tv>> $incoming): KeyedStream<Tx, Tv> {
-		return new static(async { foreach($incoming as $k => $awaitable) yield $k => await $awaitable; });
+		return new static(async { foreach($incoming as $k => $awaitable) yield $k => await $awaitable; }); // consider self rather than static
 	}
-	public static function empty(): KeyedStream<Tk, T> {
-		return new static(async{});
-	}
+	// An empty method doesn't make sense: for classes that use KeyedStream, make this KeyedStream nullable, null representing an empty stream
+	// public static function empty(): KeyedStream<Tk, T> {
+	// 	return new static(async{ 
+	// 		while(true) {}
+	// 	}); // consider self rather than static
+	// }
 }
