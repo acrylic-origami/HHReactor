@@ -3,8 +3,8 @@ namespace HHRx;
 use HHRx\Util\Collection\KeyedContainerWrapper as KC;
 use HHRx\Util\Collection\AsyncKeyedContainerWrapper as AsyncKC;
 class AsyncKeyedIteratorPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> { // extends AsyncKeyedPoll<Tk, T>?
-	private AsyncKeyedPoll<arraykey, ?(Tk, T)> $poller;
-	public function __construct(private KeyedContainer<arraykey, AsyncKeyedIterator<Tk, T>> $iterators) {
+	private AsyncKeyedPoll<mixed, ?(Tk, T)> $poller;
+	public function __construct(private KeyedContainer<mixed, AsyncKeyedIterator<Tk, T>> $iterators) {
 		// convert AsyncKC of Awaitables to Awaitable<AsyncKC<...>> to Awaitable<void>
 		
 		// Container of KeyedIterators -> KC<arraykey, Awaitable<(Tk, T)>>
@@ -12,7 +12,7 @@ class AsyncKeyedIteratorPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> { // 
 		// KC<arraykey, Awaitable<(Tk, T)>> -> AsyncKC<arraykey, (Tk, T)>
 		$this->poller = new AsyncKeyedPoll(new AsyncKC($KC->get_units()));
 	}
-	public function get_iterators(): KeyedContainer<arraykey, AsyncKeyedIterator<Tk, T>> {
+	public function get_iterators(): KeyedContainer<mixed, AsyncKeyedIterator<Tk, T>> {
 		// just because we can
 		return $this->iterators;
 	}

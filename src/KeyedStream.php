@@ -36,7 +36,7 @@ class KeyedStream<+Tk, +T> {
 					yield $k => $v;
 		});
 	}
-	public static function merge_all<Tx, Tr>(KeyedContainer<arraykey, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
+	public static function merge_all<Tx, Tr>(KeyedContainer<mixed, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
 		$producers = (new KC($incoming))->map((KeyedStream<Tx, Tr> $stream) ==> $stream->get_producer())->get_units();
 		invariant(!is_null($producers), 'Impossible condition or implementation error: argument KeyedContainer is not nullable, but is weakened by KC construction.');
 		return new static(new AsyncKeyedIteratorPoll($producers)); // consider self rather than static
