@@ -9,4 +9,7 @@ class StreamFactory {
 		});
 		return $stream;
 	}
+	public function get_total_awaitable(): Awaitable<void> { // not totally keen on this public getter
+		return $this->total_awaitable->get_awaitable();
+	}
 }
