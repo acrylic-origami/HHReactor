@@ -1,0 +1,26 @@
+## Trees
+
+Shufflr loves Trees. The Dispatcher is a tree, the subscriptions are trees, the Identifiables are trees, and the chunkables are trees. 
+
+Trees have values, children and ancestors, which can be known in the present or deferred to the future. Those that are present-valued and don't hold ancestral information are unsurprisingly the most common. For these, we start with a forest and attach the roots to a common node. Rinse and repeat up. That's all there is to a [sub]tree.
+
+Sure, trees are cool just define-and-stand-alone, but I've found that trees really shine when they are like scaffolds, eventually transforming into another tree representing worked values. The depencency tree that powers Dispatcher is my all-time and forevermore favorite example. In goes a tree of routes, in the middle the dependencies are bound within another tree, and out pops a rendered string on the other end after collapsing the tree to a single, aggregated value. Just saying "collapse" and "aggregate" makes me salivate.
+
+What selection do we have? There are a decent number of variables at play here:
+
+- Value? Children? Ancestors? (2^3)
+- Future- vs present-valued {value, children, ancestors} (coalescing with existence (above), 3^3)
+- Collection type for sub-forest
+- Subtree type (subtype? same type? supertype?)
+
+Then there are special properties that extend the formal values of trees. `AbstractFKT` is a good example, alongside its final value, it also must contain a function to generate it (in lieu of abstract classes specifically; `AbstractFKT` would be useless if these existed)
+
+### Why we need individual implementations for each Collection type?
+
+Let the catalogue begin.
+
+### Tree<Tv> | ?KeyedIterable<mixed, this> | ?Tv $v
+
+Generalized Tree. If `KeyedIterable` were covariant on its `Tk`, then `Tree` would have a `+Tk` in place of that `mixed`.
+
+### 

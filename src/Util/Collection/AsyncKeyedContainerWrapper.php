@@ -37,14 +37,4 @@ class AsyncKeyedContainerWrapper<+Tk, +Tv> extends KC<Tk, Awaitable<Tv>> {
 				$M[$k] = $fn($unit);
 		return new static($M);
 	}
-	
-	public function async_keyed_map<Tu>((function(Pair<Tk, Awaitable<Tv>>): Awaitable<Tu>) $fn): AsyncKeyedContainerWrapper<Tk, Tu> {
-		// needed because Awaitable<Tu> won't fly with KeyedContainerWrapper::keyed_map
-		$M = Map{};
-		$units = $this->get_units();
-		if(!is_null($units))
-			foreach($units as $k=>$unit)
-				$M[$k] = $fn(Pair{ $k, $unit });
-		return new static($M);
-	}
 }
