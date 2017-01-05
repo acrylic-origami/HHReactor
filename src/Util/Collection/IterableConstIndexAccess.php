@@ -5,7 +5,7 @@ class IterableConstIndexAccess<Tk as arraykey, +Tv, +TCollection as ?\ConstIndex
 	public function __construct(
 		private TCollection $units,
 		// private EmptyConstIndexAccessFactory<Tk, Tv, TCollection> $empty_collection_factory,
-		protected Set<Tk> $keys = Set{}
+		protected Vector<Tk> $keys = Vector{}
 	) {
 		parent::__construct();
 	}
@@ -19,9 +19,11 @@ class IterableConstIndexAccess<Tk as arraykey, +Tv, +TCollection as ?\ConstIndex
 	public function getIterator(): KeyedIterator<Tk, Tv> {
 		$units = $this->units;
 		if(!is_null($units)) {
-			foreach($this->keys as $key) {
-				invariant($units->containsKey($key), sprintf('Key %s missing -- keys of ConstIndexAccessWrapper not properly kept track of.', $key));
-				yield $key => $units->at($key);
+			for($i = 0; $i < $this->keys->count(); $i++) {
+				$key = $this->keys[$i];
+				// invariant($units->containsKey($key), sprintf('Key %s missing -- keys of ConstIndexAccessWrapper not properly kept track of.', $key)); // instead of err-ing, just skip over - new remove policy
+				if($units->containsKey($key))
+					yield $key => $units->at($key);
 			}
 		}
 	}
@@ -43,7 +45,7 @@ class IterableConstIndexAccess<Tk as arraykey, +Tv, +TCollection as ?\ConstIndex
 		return !(is_null($units) || !$units->containsKey($k));
 	}
 	<<__Override>>
-	public function keys(): Set<Tk> {
+	public function keys(): Vector<Tk> {
 		return $this->keys;
 	}
 	<<__Override>>
