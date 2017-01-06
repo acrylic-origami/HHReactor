@@ -2,7 +2,7 @@
 namespace HHRx\Collection;
 // Until both object-protected and contravariant ConstIndexAccess on Tk come along, Tk must be invariant. I need $keys (either the setter or the getter of $keys) to be at most protected so that the mutable descendants can modify it directly (protected setter, private getter) or define a private $keys and overwrite the getter so all of the methods in this class use that instance (private getter, protected setter)
 use HHRx\Collection\KeyedContainerWrapper as KC;
-class IterableConstIndexAccess<Tk as arraykey, +Tv, +TCollection as ?\ConstIndexAccess<Tk, Tv>> extends ArtificialKeyedIterable<Tk, Tv, KC<Tk, Tv>> implements \ConstIndexAccess<Tk, Tv> {
+class IterableConstIndexAccess<Tk as arraykey, +Tv, +TCollection as ?\ConstIndexAccess<Tk, Tv>> extends ArtificialKeyedIterable<Tk, Tv> implements \ConstIndexAccess<Tk, Tv> {
 	protected Vector<Tk> $keys;
 	public function __construct(
 		private TCollection $units,
@@ -13,7 +13,6 @@ class IterableConstIndexAccess<Tk as arraykey, +Tv, +TCollection as ?\ConstIndex
 			$this->keys = new Vector($keys); // I hope this doesn't copy
 		else
 			$this->keys = Vector{};
-		parent::__construct(KC::class);
 	}
 	public function get_units(): TCollection {
 		return $this->units;
