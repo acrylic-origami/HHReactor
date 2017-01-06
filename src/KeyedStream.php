@@ -1,16 +1,16 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Util\Collection\KeyedContainerWrapper as KC;
-use HHRx\Util\Collection\AsyncKeyedContainerWrapper as AsyncKC;
-use HHRx\Util\Collection\EmptyIterable;
+use HHRx\Collection\KeyedContainerWrapper as KC;
+use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
+use HHRx\Collection\EmptyIterable;
 <<__ConsistentConstruct>>
 class KeyedStream<+Tk, +T> {
 	private Vector<(function(T): Awaitable<void>)> $subscribers = Vector{};
 	private Vector<(function(): Awaitable<void>)> $end_subscribers = Vector{};
 	public function __construct(private AsyncKeyedIterator<Tk, T> $producer) {}
 	public async function run(): Awaitable<void> {
-		foreach($this->producer await as $val)
-			await \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($val))); // event subscriptions
+		while($next = await $this->producer->next())
+			await \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($next[1]))); // event subscriptions
 		await \HH\Asio\v($this->end_subscribers->map(((function(): Awaitable<void>) $handler) ==> $handler())); // end subscriptions
 	}
 	public async function get_total_awaitable(): Awaitable<void> {
@@ -22,7 +22,7 @@ class KeyedStream<+Tk, +T> {
 	public function subscribe((function(T): Awaitable<void>) $incoming): void {
 		$this->subscribers->add($incoming);
 	}
-	public function subscribe_end((function(): Awaitable<void>) $incoming): void {
+	public function onEnd((function(): Awaitable<void>) $incoming): void {
 		$this->end_subscribers->add($incoming);
 	}
 	public function merge<Tx super Tk, Tr super T>(KeyedStream<Tx, Tr> $incoming): KeyedStream<Tx, Tr> {
@@ -41,8 +41,13 @@ class KeyedStream<+Tk, +T> {
 					yield $k => $v;
 		});
 	}
-	public function end_with<Tx super Tk, Tr super T>(KeyedStream<mixed, mixed> $incoming) {
-		$incoming->on_end(new EmptyIterable());
+	public function end_with(KeyedStream<mixed, mixed> $incoming): void {
+		$incoming->onEnd(async () ==> {
+			$this->producer = new \HHRx\Collection\EmptyKeyedIterator();
+		});
+	}
+	public function end_on(Awaitable<mixed> $bound): void {
+		$this->end_with(new KeyedStream(async { yield await $bound; }));
 	}
 	public static function merge_all<Tx, Tr>(KeyedContainer<mixed, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
 		$producers = (new KC($incoming))->map((KeyedStream<Tx, Tr> $stream) ==> $stream->get_producer())->get_units();

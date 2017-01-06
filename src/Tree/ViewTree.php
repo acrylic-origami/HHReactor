@@ -1,6 +1,6 @@
 <?hh // strict
 namespace HHRx\Tree;
-use \HHRx\Util\Collection\KeyedContainerWrapper as KC;
+use \HHRx\Collection\KeyedContainerWrapper as KC;
 class ViewTree<+Tv, +Tx as arraykey> extends Tree<(Tv, ?arraykey), Tx> {
 	public function get_view(): ?Tv {
 		$v = $this->get_v();

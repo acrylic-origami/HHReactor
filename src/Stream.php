@@ -1,3 +1,3 @@
 <?hh // strict
 namespace HHRx;
-type Stream<T> = KeyedStream<mixed, T>;
+type Stream<+T> = KeyedStream<mixed, T>;

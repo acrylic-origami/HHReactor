@@ -12,10 +12,10 @@
 // of _resolve.
 
 namespace HHRx\Tree;
-use \HHRx\Util\Collection\IterableConstIndexAccess as IterableCIA;
-class AbstractFutureTree<+Tv, Tx as arraykey> extends FutureKeyedTree<Tv, Tx> {
+use \HHRx\Collection\IterableConstIndexAccess as IterableCIA;
+class AbstractFutureTree<+Tv, Tx as arraykey> extends FutureTree<Tv, Tx> {
 	public function __construct(
-		IterableCIA<Tx, Awaitable<this>> $forest,
+		IterableCIA<Tx, Awaitable<this>, \ConstIndexAccess<Tx, Awaitable<this>>> $forest,
 		private (function(this): Awaitable<Tv>) $_resolver,
 		?Tv $v = null
 		) {

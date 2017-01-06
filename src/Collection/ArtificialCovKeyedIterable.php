@@ -1,9 +1,13 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
-use HHRx\Util\Collection\CovKeyedContainerWrapper as CovKC;
+namespace HHRx\Collection;
+use HHRx\Collection\CovKeyedContainerWrapper as CovKC;
 abstract class ArtificialCovKeyedIterable<+Tk, +Tv, +TWrapper as CovKC<Tk, Tv>> implements Iterable<Tv> {
 	public function __construct(private classname<TWrapper> $wrapper_class) {}
 	abstract public function getIterator(): KeyedIterator<Tk, Tv>;
+	
+	public function get_wrapper(): classname<TWrapper> {
+		return $this->wrapper_class;
+	}
 	
 	public function nullable_reduce<TInitial>((function(?TInitial, Tv): TInitial) $f, ?TInitial $initial): ?TInitial {
 		return $this->reduce($f, $initial);

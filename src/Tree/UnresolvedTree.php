@@ -1,6 +1,6 @@
 <?hh // strict
 namespace HHRx\Tree;
-use HHRx\Util\Collection\KeyedContainerWrapper as KC;
+use HHRx\Collection\KeyedContainerWrapper as KC;
 abstract class UnresolvedTree<+Tv, +Tx as arraykey> extends Tree<Tv, Tx> {
 	private ?Tv $v;
 	public function __construct(KC<Tx, this> $forest, private (function(?KC<Tx, Tv>): Tv) $resolver) {

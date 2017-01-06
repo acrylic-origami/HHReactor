@@ -1,17 +1,17 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Util\Collection\VectorIA;
+use HHRx\Collection\VectorIA;
 // type EventHandler = (function((function(): Awaitable<void>)): void);
 class TotalAwaitable {
-	private ConditionWaitHandle<void> $_total_awaitable;
+	private Awaitable<void> $_total_awaitable;
 	private VectorIA<Awaitable<void>> $subawaitables;
 	public function __construct(Awaitable<void> $initial) {
 		$this->subawaitables = new VectorIA(Vector{ $initial }); // requires at least one `Awaitable` that won't resolve right away
-		$this->_total_awaitable = ConditionWaitHandle::create((async{
-			foreach($this->subawaitables as $subawaitable) {
+		$this->_total_awaitable = (async () ==> {
+			// note: cannot use \HH\Asio\v because a longer awaitable could be added. Also, can't use Vector because Vector complains that it's being changed during iteration
+			foreach($this->subawaitables as $subawaitable)
 				await $subawaitable;
-			}
-		})->getWaitHandle());
+		})();
 	}
 	public function add(Awaitable<void> $incoming): void {
 		$this->subawaitables->add($incoming);
@@ -21,5 +21,8 @@ class TotalAwaitable {
 	}
 	public function get_awaitable(): Awaitable<void> {
 		return $this->_total_awaitable;
+	}
+	public function get_static_awaitable(): Awaitable<Vector<void>> {
+		return \HH\Asio\v($this->subawaitables->get_units());
 	}
 }

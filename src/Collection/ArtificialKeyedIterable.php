@@ -1,10 +1,7 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
-use HHRx\Util\Collection\KeyedContainerWrapper as KC;
-abstract class ArtificialKeyedIterable<Tk, +Tv> extends ArtificialCovKeyedIterable<Tk, Tv, KC<Tk, Tv>> implements KeyedIterable<Tk, Tv> {
-	public function __construct() {
-		parent::__construct(KC::class);
-	}
+namespace HHRx\Collection;
+use HHRx\Collection\KeyedContainerWrapper as KC;
+abstract class ArtificialKeyedIterable<Tk, +Tv, +TCollection as KC<Tk, Tv>> extends ArtificialCovKeyedIterable<Tk, Tv, TCollection> implements KeyedIterable<Tk, Tv> {
 	abstract public function getIterator(): KeyedIterator<Tk, Tv>;
 	public function toImmMap(): ImmMap<Tk, Tv> {
 		return new ImmMap($this->toMap());

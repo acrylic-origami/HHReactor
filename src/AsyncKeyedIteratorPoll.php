@@ -1,7 +1,7 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Util\Collection\KeyedContainerWrapper as KC;
-use HHRx\Util\Collection\AsyncKeyedContainerWrapper as AsyncKC;
+use HHRx\Collection\KeyedContainerWrapper as KC;
+use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
 class AsyncKeyedIteratorPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> { // extends AsyncKeyedPoll<Tk, T>?
 	private AsyncKeyedPoll<mixed, ?(Tk, T)> $poller;
 	public function __construct(private KeyedContainer<mixed, AsyncKeyedIterator<Tk, T>> $iterators) {

@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
+namespace HHRx\Collection;
 class VectorIA<Tv> extends IterableIndexAccess<int, Tv, Vector<Tv>> {
 	public function __construct(Vector<Tv> $collection = Vector{}) {
 		parent::__construct($collection, \Vector::fromKeysOf($collection));

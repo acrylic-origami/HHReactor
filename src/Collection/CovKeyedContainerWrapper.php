@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
+namespace HHRx\Collection;
 // class KeyedContainerWrapper<+Tk, +Tv, +KeyedContainer<Tk, Tv> as KeyedContainer<Tk, Tv>>
 <<__ConsistentConstruct>>
 class CovKeyedContainerWrapper<+Tk, +Tv> extends ArtificialCovKeyedIterable<Tk, Tv, this> {

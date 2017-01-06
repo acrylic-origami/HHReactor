@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
+namespace HHRx\Collection;
 <<__ConsistentConstruct>>
 abstract class TraversableWrapper<+Tv, +TCollection as Traversable<Tv>> {
 	public function __construct(

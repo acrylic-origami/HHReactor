@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
+namespace HHRx\Collection;
 class MapIA<Tk as arraykey, Tv> extends IterableIndexAccess<Tk, Tv, Map<Tk, Tv>> {
 	public function __construct(Map<Tk, Tv> $collection = Map{}) {
 		parent::__construct($collection, \Vector::fromKeysOf($collection));

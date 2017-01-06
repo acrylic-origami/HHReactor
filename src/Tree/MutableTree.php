@@ -1,7 +1,7 @@
 <?hh // strict
 namespace HHRx\Tree;
-use \HHRx\Util\Collection\KeyedContainerWrapper as KC;
-use \HHRx\Util\Collection\IterableIndexAccess as IterableIA;
+use \HHRx\Collection\KeyedContainerWrapper as KC;
+use \HHRx\Collection\IterableIndexAccess as IterableIA;
 class MutableTree<Tv, Tx as arraykey> extends Tree<Tv, Tx> {
 	public function __construct(
 		protected IterableIA<Tx, this, \IndexAccess<Tx, this>> $forest,

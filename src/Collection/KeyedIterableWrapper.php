@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
+namespace HHRx\Collection;
 abstract class KeyedIterableWrapper<Tu, +Tv, +T as KeyedIterable<Tu, Tv>> implements IterableWrapper<T, Tv> {
 	public function __construct(private T $units) {}
 	

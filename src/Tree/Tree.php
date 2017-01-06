@@ -1,12 +1,12 @@
 <?hh // strict
 namespace HHRx\Tree;
-use \HHRx\Util\Collection\IterableConstIndexAccess as IterableCIA;
+use \HHRx\Collection\IterableConstIndexAccess as IterableCIA;
 // oooooh, just you wait until Tree<+Tv, Tx as arraykey, +TIterable as KeyedIterable<Tx, this>> comes along
 // this won't be just any ordinary tree
 // oooh no, this'll be the fucking Pando\ of abstract trees
 
 // ...though unfortunately KeyedIterable is still invariant on Tx, and until the <<__Const>> directive is introduced, it'll stay that way.
-class Tree<+Tv, Tx as arraykey> extends \HHRx\Util\Collection\ArtificialKeyedIterable<Tx, ?Tv> {
+class Tree<+Tv, Tx as arraykey> extends \HHRx\Collection\ArtificialKeyedIterable<Tx, ?Tv> {
 	// private KeyedContainerWrapper<Tx, this, KeyedContainer<Tx, this>> $forest;
 	// `this` disallowed as a type constraint forces the third parameter to be `KeyedContainer` rather than a generic `TCollection [as KeyedContainer<Tx, this>]`
 	public function __construct(

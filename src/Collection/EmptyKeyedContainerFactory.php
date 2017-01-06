@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
+namespace HHRx\Collection;
 <<__ConsistentConstruct>>
 interface EmptyKeyedContainerFactory<+Tk as arraykey, +Tv, +TContainer as ?KeyedContainer<Tk, Tv>> {
 	public function __construct();

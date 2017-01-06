@@ -1,7 +1,7 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Util\Collection\KeyedContainerWrapper as KC;
-use HHRx\Util\Collection\AsyncKeyedContainerWrapper as AsyncKC;
+use HHRx\Collection\KeyedContainerWrapper as KC;
+use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
 class AsyncKeyedPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> {
 	private ConditionWaitHandle<(Tk, T)> $wait_handle;
 	// ... not a _huge_ fan of public $total_awaitable
@@ -12,13 +12,12 @@ class AsyncKeyedPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> {
 			// must be wrapped in async to make Awaitable<void> for ConditionWaitHandle
 			
 			// too bad inst_meth doesn't work on private methods
-			await $iter->async_keyed_map((Pair<Tk, Awaitable<T>> $p) ==> $this->_bind($p))->KCm();
+			await $iter->mapWithKey((Tk $k, Awaitable<T> $awaitable) ==> $this->_bind($k, $awaitable))->KCm();
 		};
 		$this->wait_handle = ConditionWaitHandle::create((async{})->getWaitHandle()); // blank wait handle to avoid null checks later
 	}
-	private async function _bind(Pair<Tk, Awaitable<T>> $p): Awaitable<void> {
+	private async function _bind(Tk $k, Awaitable<T> $awaitable): Awaitable<void> {
 		// wrap Awaitables in another async that will trigger success of the finish line wait handle
-		list($k, $awaitable) = $p;
 		try {
 			$v = await $awaitable;
 			$this->wait_handle->succeed(tuple($k, $v));

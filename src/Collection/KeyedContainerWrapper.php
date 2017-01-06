@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Util\Collection;
+namespace HHRx\Collection;
 // class KeyedContainerWrapper<+Tk, +Tv, +KeyedContainer<Tk, Tv> as KeyedContainer<Tk, Tv>>
 <<__ConsistentConstruct>>
 class KeyedContainerWrapper<Tk, +Tv> extends CovKeyedContainerWrapper<Tk, Tv> implements KeyedIterable<Tk, Tv> {
