@@ -1,18 +1,17 @@
 <?hh // strict
 namespace HHRx;
 use HHRx\Collection\KeyedContainerWrapper as KC;
-use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
 class AsyncKeyedPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> {
 	private ConditionWaitHandle<(Tk, T)> $wait_handle;
 	// ... not a _huge_ fan of public $total_awaitable
 	protected Awaitable<void> $total_awaitable;
-	public function __construct(AsyncKC<Tk, T> $iter) {
+	public function __construct(KC<Tk, Awaitable<T>> $iter) {
 		// convert AsyncKC of Awaitables to Awaitable<AsyncKC<...>> to Awaitable<void>
 		$this->total_awaitable = async {
 			// must be wrapped in async to make Awaitable<void> for ConditionWaitHandle
 			
 			// too bad inst_meth doesn't work on private methods
-			await $iter->mapWithKey((Tk $k, Awaitable<T> $awaitable) ==> $this->_bind($k, $awaitable))->KCm();
+			await \HHRx\Asio\KCm($iter->mapWithKey((Tk $k, Awaitable<T> $awaitable) ==> $this->_bind($k, $awaitable)));
 		};
 		$this->wait_handle = ConditionWaitHandle::create((async{})->getWaitHandle()); // blank wait handle to avoid null checks later
 	}

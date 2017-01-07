@@ -1,16 +1,16 @@
 <?hh // strict
 namespace HHRx\Tree;
 use \HHRx\Collection\KeyedContainerWrapper as KC;
-use \HHRx\Collection\IterableIndexAccess as IterableIA;
+use \HHRx\Collection\MapIA;
 class MutableTree<Tv, Tx as arraykey> extends Tree<Tv, Tx> {
 	public function __construct(
-		protected IterableIA<Tx, this, \IndexAccess<Tx, this>> $forest,
+		protected MapIA<Tx, this> $forest,
 		private ?Tv $v = null
 		) {
 		parent::__construct($forest, $v);
 	}
 	<<__Override>>
-	public function get_forest(): IterableIA<Tx, this, \IndexAccess<Tx, this>> {
+	public function get_forest(): MapIA<Tx, this> {
 		return $this->forest;
 	}
 	public function add_subtree(Tx $k, this $incoming): void {

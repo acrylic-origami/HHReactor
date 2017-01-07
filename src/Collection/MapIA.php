@@ -1,8 +1,9 @@
 <?hh // strict
 namespace HHRx\Collection;
-class MapIA<Tk as arraykey, Tv> extends IterableIndexAccess<Tk, Tv, Map<Tk, Tv>> {
-	public function __construct(Map<Tk, Tv> $collection = Map{}) {
-		parent::__construct($collection, \Vector::fromKeysOf($collection));
+class MapIA<Tk as arraykey, Tv> extends ConstMapCIA<Tk, Tv, Map<Tk, Tv>, Vector<Tk>, VectorKeys, VectorIA<Tk>> implements \IndexAccess<Tk, Tv> {
+	use IterableIndexAccessMutators<Tk, Tv, Map<Tk, Tv>, VectorIA<Tk>>;
+	public function __construct(Map<Tk, Tv> $collection = Map{}, ?VectorIA<Tk> $keys = null) {
+		parent::__construct(new Map($collection), $keys ?? new VectorIA(Vector::fromKeysOf($collection)));
 	}
 	<<__Override>>
 	public function setAll(?KeyedTraversable<Tk, Tv> $incoming): this {
@@ -13,7 +14,7 @@ class MapIA<Tk as arraykey, Tv> extends IterableIndexAccess<Tk, Tv, Map<Tk, Tv>>
 			invariant(!is_null($units), 'Cannot `setAll` on null collection.');
 			foreach($incoming as $k => $_)
 				if(!$units->containsKey($k))
-					$this->keys->add($k);
+					$this->keys()->add($k);
 			$units->setAll($incoming);
 		}
 		return $this;

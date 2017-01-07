@@ -1,6 +1,6 @@
 <?hh // strict
 namespace HHRx\Tree;
-use \HHRx\Collection\IterableConstIndexAccess as IterableCIA;
+use \HHRx\Collection\ConstMapCIA;
 // oooooh, just you wait until Tree<+Tv, Tx as arraykey, +TIterable as KeyedIterable<Tx, this>> comes along
 // this won't be just any ordinary tree
 // oooh no, this'll be the fucking Pando\ of abstract trees
@@ -10,16 +10,16 @@ class Tree<+Tv, Tx as arraykey> extends \HHRx\Collection\ArtificialKeyedIterable
 	// private KeyedContainerWrapper<Tx, this, KeyedContainer<Tx, this>> $forest;
 	// `this` disallowed as a type constraint forces the third parameter to be `KeyedContainer` rather than a generic `TCollection [as KeyedContainer<Tx, this>]`
 	public function __construct(
-		private IterableCIA<Tx, this, \ConstIndexAccess<Tx, this>> $forest,
+		private ExactConstMapCIA<Tx, this> $forest,
 		private ?Tv $v = null
-		) {
+	) {
 		parent::__construct();
 	}
 	public function get_v(): ?Tv { // final
 		// this method might or might not be final -- do I want subclasses to have their own private $vs? Smells bad: upcasting will yield a different value.
 		return $this->v;
 	}
-	public function get_forest(): IterableCIA<Tx, this, \ConstIndexAccess<Tx, this>> {
+	public function get_forest(): ExactConstMapCIA<Tx, this> {
 		return $this->forest;
 	}
 	public function reduce_tree<TInitial>((function(?TInitial, ?Tv): ?TInitial) $fn, ?TInitial $initial): ?TInitial {

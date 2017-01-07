@@ -66,14 +66,14 @@ abstract class ArtificialKeyedIterable<+Tk, +Tv> implements KeyedIterable<Tk, Tv
 		return $this; // isn't this already as lazy as it can get? o_O I mean really, what is `Iterable::lazy()` meant to do anyways?
 	}
 	// <<__Deprecated('For more flexible return type, reduce on the empty container of your choice.')>>
-	public function map<Tu>((function(Tv): Tu) $fn): ArtificialKeyedIterable<Tk, Tu> {
+	public function map<Tu>((function(Tv): Tu) $fn): KC<Tk, Tu> {
 		$M = Map{};
 		foreach($this->getIterator() as $k=>$unit)
 			$M[$k] = $fn($unit);
 		return new KC($M);
 	}
 	// <<__Deprecated('For more flexible return type, reduce on the empty container of your choice.')>>
-	public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): ArtificialKeyedIterable<Tk, Tu> {
+	public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): KC<Tk, Tu> {
 		$M = Map{};
 		foreach($this->getIterator() as $k=>$unit)
 			$M[$k] = $fn($k, $unit);
