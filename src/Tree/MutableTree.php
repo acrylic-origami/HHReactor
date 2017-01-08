@@ -1,16 +1,16 @@
 <?hh // strict
 namespace HHRx\Tree;
-use \HHRx\Collection\KeyedContainerWrapper as KC;
+use \HHRx\Collection\WeakMutableKeyedContainerWrapper as WeakMutableKC;
 use \HHRx\Collection\MapIA;
 class MutableTree<Tv, Tx as arraykey> extends Tree<Tv, Tx> {
 	public function __construct(
-		protected MapIA<Tx, this> $forest,
+		protected WeakMutableKC<Tx, this> $forest,
 		private ?Tv $v = null
 		) {
 		parent::__construct($forest, $v);
 	}
 	<<__Override>>
-	public function get_forest(): MapIA<Tx, this> {
+	public function get_forest(): WeakMutableKC<Tx, this> {
 		return $this->forest;
 	}
 	public function add_subtree(Tx $k, this $incoming): void {

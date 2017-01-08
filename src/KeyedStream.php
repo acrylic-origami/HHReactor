@@ -1,6 +1,7 @@
 <?hh // strict
 namespace HHRx;
 use HHRx\Collection\KeyedContainerWrapper as KC;
+use HHRx\Collection\VectorW;
 use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
 use HHRx\Collection\EmptyIterable;
 <<__ConsistentConstruct>>
@@ -50,9 +51,12 @@ class KeyedStream<+Tk, +T> {
 		$this->end_with(new KeyedStream(async { yield await $bound; }));
 	}
 	public static function merge_all<Tx, Tr>(KeyedContainer<mixed, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
-		$producers = (new KC($incoming))->map((KeyedStream<Tx, Tr> $stream) ==> $stream->get_producer())->get_units();
-		invariant(!is_null($producers), 'Impossible condition or implementation error: argument KeyedContainer is not nullable, but is weakened by KC construction.');
-		return new static(new AsyncKeyedIteratorPoll($producers)); // consider self rather than static
+		// sacrificing `map` here because KeyedContainerWrapper isn't instantiable
+		$producers = Vector{};
+		foreach($incoming as $substream) {
+			$producers->add($substream->get_producer());
+		}
+		return new static(new AsyncKeyedIteratorPoll(new VectorW($producers))); // consider self rather than static
 	}
 	public static function just<Tx, Tv>(Awaitable<Tv> $incoming, ?Tx $key = null): KeyedStream<?Tx, Tv> {
 		return new static(async { yield $key => (await $incoming); }); // consider self rather than static
