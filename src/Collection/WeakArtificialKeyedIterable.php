@@ -1,47 +1,48 @@
 <?hh // strict
 namespace HHRx\Collection;
 use HHRx\Collection\KeyedContainerWrapper as KC;
+use HHRx\Collection\ExactKeyedContainerWrapper as ExactKC;
 use HHRx\Collection\MutableKeyedContainerWrapper as MutableKC;
 /* HH_IGNORE_ERROR[4120] KeyedIterable would be covariant on Tk if ImmMap (cf. toImmMap) weren't invariant on it because of its getter. */
 abstract class WeakArtificialKeyedIterable<+Tk, +Tv> implements KeyedIterable<Tk, Tv> {
 	abstract public function getIterator(): KeyedIterator<Tk, Tv>;
 	
 	// weak `new`-studded methods
-	public function slice(int $start, int $len): KC<Tk, Tv, \ConstMap<Tk, Tv>> {
+	public function slice(int $start, int $len): KC<Tk, Tv, KeyedContainer<Tk, Tv>> {
 		$ret = new MapW();
 		$iterator = $this->getIterator();
 		for(; $len > 0 && $iterator->valid(); (($start-- > 0) ?: $len--) && $iterator->next())
 			$ret->set($iterator->key(), $iterator->current());
 		return $ret;
 	}
-	public function takeWhile((function(Tv): bool) $until): KC<Tk, Tv, \ConstMap<Tk, Tv>> {
+	public function takeWhile((function(Tv): bool) $until): KC<Tk, Tv, KeyedContainer<Tk, Tv>> {
 		$ret = new MapW();
 		for($iterator = $this->getIterator(); $until($iterator->current()); $iterator->next()) {
 			$ret->set($iterator->key(), $iterator->current());
 		}
 		return $ret;
 	}
-	public function filter((function(Tv): bool) $fn): KC<Tk, Tv, \ConstMap<Tk, Tv>> {
+	public function filter((function(Tv): bool) $fn): KC<Tk, Tv, KeyedContainer<Tk, Tv>> {
 		$ret = new MapW();
 		foreach($this->getIterator() as $k => $v)
 			if($fn($v))
 				$ret->set($k, $v);
 		return $ret;
 	}
-	public function filterWithKey((function(Tk, Tv): bool) $fn): KC<Tk, Tv, \ConstMap<Tk, Tv>> {
+	public function filterWithKey((function(Tk, Tv): bool) $fn): KC<Tk, Tv, KeyedContainer<Tk, Tv>> {
 		$ret = new MapW();
 		foreach($this->getIterator() as $k => $v)
 			if($fn($k, $v))
 				$ret->set($k, $v);
 		return $ret;
 	}
-	public function map<Tu>((function(Tv): Tu) $fn): MutableKC<Tk, Tu, \MutableKeyedContainer<Tk, Tu>> {
+	public function map<Tu>((function(Tv): Tu) $fn): ExactKC<Tk, Tu> {
 		$ret = new MapW();
 		foreach($this->getIterator() as $k => $v)
 			$ret->set($k, $fn($v));
 		return $ret;
 	}
-	public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): MutableKC<Tk, Tu, \MutableKeyedContainer<Tk, Tu>> {
+	public function mapWithKey<Tu>((function(Tk, Tv): Tu) $fn): ExactKC<Tk, Tu> {
 		$ret = new MapW();
 		foreach($this->getIterator() as $k => $v)
 			$ret->set($k, $fn($k, $v));
@@ -109,7 +110,7 @@ abstract class WeakArtificialKeyedIterable<+Tk, +Tv> implements KeyedIterable<Tk
 				break;
 		return $copy;
 	}
-	public function take(int $n): KC<Tk, Tv, \ConstMap<Tk, Tv>> {
+	public function take(int $n): KC<Tk, Tv, KeyedContainer<Tk, Tv>> {
 		return $this->slice(0, $n);
 	}
 	/* HH_IGNORE_ERROR[4045] Oddly, the Iterable interface doesn't parameterize the array, but its sitting sheltered in a decl. */

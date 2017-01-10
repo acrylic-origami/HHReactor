@@ -14,13 +14,13 @@ abstract class ArtificialKeyedIterable<+Tk, +Tv, +TCollection as KeyedContainer<
 	public function nullable_reduce<TInitial>((function(?TInitial, Tv): TInitial) $f, ?TInitial $initial): ?TInitial {
 		return $this->reduce($f, $initial);
 	}
-	public function reduce<TInitial>((function(?TInitial, Tv): TInitial) $f, TInitial $initial): TInitial {
-		return $this->keyed_reduce((?TInitial $prev, Pair<Tk, Tv> $next) ==> $f($prev, $next[1]), $initial);
+	public function reduce<TInitial>((function(TInitial, Tv): TInitial) $f, TInitial $initial): TInitial {
+		return $this->keyed_reduce((TInitial $prev, Pair<Tk, Tv> $next) ==> $f($prev, $next[1]), $initial);
 	}
 	public function nullable_keyed_reduce<TInitial>((function(?TInitial, Pair<Tk, Tv>): ?TInitial) $f, TInitial $initial): ?TInitial {
 		return $this->keyed_reduce($f, $initial);
 	}
-	public function keyed_reduce<TInitial>((function(?TInitial, Pair<Tk, Tv>): TInitial) $f, TInitial $initial): TInitial {
+	public function keyed_reduce<TInitial>((function(TInitial, Pair<Tk, Tv>): TInitial) $f, TInitial $initial): TInitial {
 		foreach($this->getIterator() as $k => $v)
 			$initial = $f($initial, Pair{$k, $v});
 		return $initial;

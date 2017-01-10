@@ -10,8 +10,8 @@ class KeyedStream<+Tk, +T> {
 	private Vector<(function(): Awaitable<void>)> $end_subscribers = Vector{};
 	public function __construct(private AsyncKeyedIterator<Tk, T> $producer) {}
 	public async function run(): Awaitable<void> {
-		while($next = await $this->producer->next())
-			await \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($next[1]))); // event subscriptions
+		foreach($this->producer await as $next)
+			await \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($next))); // event subscriptions
 		await \HH\Asio\v($this->end_subscribers->map(((function(): Awaitable<void>) $handler) ==> $handler())); // end subscriptions
 	}
 	public async function get_total_awaitable(): Awaitable<void> {
@@ -26,8 +26,8 @@ class KeyedStream<+Tk, +T> {
 	public function onEnd((function(): Awaitable<void>) $incoming): void {
 		$this->end_subscribers->add($incoming);
 	}
-	public function merge<Tx super Tk, Tr super T>(KeyedStream<Tx, Tr> $incoming): KeyedStream<Tx, Tr> {
-		return self::merge_all(Vector{ $this, $incoming });
+	public function merge_with<Tx super Tk, Tr super T>(KeyedStream<Tx, Tr> $incoming): KeyedStream<Tx, Tr> {
+		return self::merge(Vector{ $this, $incoming });
 	}
 	public function concat<Tx super Tk, Tr super T>(KeyedStream<Tx, Tr> $incoming): KeyedStream<Tx, Tr> {
 		return new static(async { 
@@ -48,9 +48,12 @@ class KeyedStream<+Tk, +T> {
 		});
 	}
 	public function end_on(Awaitable<mixed> $bound): void {
-		$this->end_with(new KeyedStream(async { yield await $bound; }));
+		$this->end_with(new KeyedStream(async { 
+			$resolved_bound = await $bound;
+			yield $resolved_bound;
+		}));
 	}
-	public static function merge_all<Tx, Tr>(KeyedContainer<mixed, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
+	public static function merge<Tx, Tr>(KeyedContainer<mixed, KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
 		// sacrificing `map` here because KeyedContainerWrapper isn't instantiable
 		$producers = Vector{};
 		foreach($incoming as $substream) {
@@ -59,10 +62,18 @@ class KeyedStream<+Tk, +T> {
 		return new static(new AsyncKeyedIteratorPoll(new VectorW($producers))); // consider self rather than static
 	}
 	public static function just<Tx, Tv>(Awaitable<Tv> $incoming, ?Tx $key = null): KeyedStream<?Tx, Tv> {
-		return new static(async { yield $key => (await $incoming); }); // consider self rather than static
+		return new static(async {
+			$resolved_incoming = await $incoming;
+			yield $key => $resolved_incoming;
+		}); // consider self rather than static
 	}
 	public static function from<Tx, Tv>(KeyedIterable<Tx, Awaitable<Tv>> $incoming): KeyedStream<Tx, Tv> {
-		return new static(async { foreach($incoming as $k => $awaitable) yield $k => await $awaitable; }); // consider self rather than static
+		return new static(async { 
+			foreach($incoming as $k => $awaitable) {
+				$resolved_awaitable = await $awaitable;
+				yield $k => $resolved_awaitable;
+			}
+		}); // consider self rather than static
 	}
 	// An empty method doesn't make sense: for classes that use KeyedStream, make this KeyedStream nullable, null representing an empty stream
 	// public static function empty(): KeyedStream<Tk, T> {

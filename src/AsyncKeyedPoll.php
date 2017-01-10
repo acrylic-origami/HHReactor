@@ -1,46 +1,61 @@
 <?hh // strict
 namespace HHRx;
 use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
-use HHRx\Collection\WeakKeyedContainerWrapper as WeakKC;
+use HHRx\Collection\ExactKeyedContainerWrapper as ExactKC;
 use HHRx\Collection\AsyncMutableKeyedContainerWrapper as AsyncMutableKC;
+use HHRx\Collection\PairwiseKeyedContainerWrapper as PairwiseKC;
 class AsyncKeyedPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> {
-	private ConditionWaitHandle<(Tk, T)> $wait_handle;
+	private ConditionWaitHandle<(Tk, T)> $race_handle;
 	// ... not a _huge_ fan of public $total_awaitable
-	protected Awaitable<void> $total_awaitable;
-	public function __construct(WeakKC<Tk, Awaitable<T>> $iter) {
+	protected WaitHandle<void> $total_awaitable_handle;
+	private Vector<Pair<Tk, Awaitable<T>>> $subawaitables = Vector{};
+	public function __construct(KeyedIterable<Tk, Awaitable<T>> $subawaitables) {
 		// convert AsyncKC of Awaitables to Awaitable<AsyncKC<...>> to Awaitable<void>
-		$this->total_awaitable = async {
+		$total_awaitable = async {
 			// must be wrapped in async to make Awaitable<void> for ConditionWaitHandle
 			
 			// too bad inst_meth doesn't work on private methods
-			await $iter->keyed_reduce(
-				// given TInitial := AsyncMutableKC<Tk, void, \MutableKeyedContainer<Tk, Awaitable<void>>>
-				// (function(?TInitial, Pair<Tk, Awaitable<T>>): TInitial)
-				($prev, $k_v) ==> {
-					invariant(!is_null($prev), 'Implementation error: non-null `AsyncKeyedMutable` passed to `AsyncKC::reduce`, but null value generated.');
-					return $prev->set($k_v[0], $this->_bind($k_v[0], $k_v[1]));
-				},
-				new AsyncMutableKC(Map{})
-			)->m();
+			$M = Map{};
+			foreach($subawaitables as $k => $awaitable) {
+				$this->subawaitables->add(Pair{$k, $awaitable});
+				$M->set($k, $this->_bind($k, $awaitable));
+			}
+			await \HH\Asio\m($M);
 		};
-		$this->wait_handle = ConditionWaitHandle::create((async{})->getWaitHandle()); // blank wait handle to avoid null checks later
+		$this->total_awaitable_handle = $total_awaitable->getWaitHandle();
+		$this->race_handle = ConditionWaitHandle::create($this->total_awaitable_handle);
 	}
 	private async function _bind(Tk $k, Awaitable<T> $awaitable): Awaitable<void> {
 		// wrap Awaitables in another async that will trigger success of the finish line wait handle
 		try {
 			$v = await $awaitable;
-			$this->wait_handle->succeed(tuple($k, $v));
+			var_dump(Pair{$k, $v});
+			$this->race_handle->succeed(tuple($k, $v));
 		}
-		catch(\Exception $e) $this->wait_handle->fail($e);
+		catch(\Exception $e) {
+			$this->race_handle->fail($e);
+		}
 	}
-	protected function _restart_race(): void {
-		$this->wait_handle = ConditionWaitHandle::create($this->total_awaitable->getWaitHandle());
+	private function get_subawaitables(): Vector<Pair<Tk, Awaitable<T>>> {
+		return $this->subawaitables;
 	}
-	public function extend(Awaitable<void> $incoming): void {
-		$this->total_awaitable = async { await \HH\Asio\v(Vector{ $this->total_awaitable, $incoming }); };
+	public async function next(): Awaitable<?(Tk, T)> {
+		if($this->total_awaitable_handle->isFinished())
+			// Even if the last awaitables complete while this code is running, the total awaitable won't resolve until control returns to the top level join and jumps to these awaitables which trigger the wait handle in turn. If this wait handle is finished, then iteration is truly finished.
+			return null;
+		$next = await $this->race_handle;
+		if(!$this->total_awaitable_handle->isFinished())
+			// ConditionWaitHandle::create can't take finished Awaitables, so if this is the last element, don't reset the race.
+			$this->race_handle = ConditionWaitHandle::create($this->total_awaitable_handle);
+		return $next;
 	}
-	public async function next(): Awaitable<(Tk, T)> {
-		$this->_restart_race();
-		return await $this->wait_handle;
+	public static function merge<Tx, Tv>(Iterable<AsyncKeyedPoll<Tx, Tv>> $incoming): AsyncKeyedPoll<Tx, Tv> {
+		$pairwise = Vector{};
+		foreach($incoming as $poller) {
+			$stripped_awaitables = $poller->get_subawaitables()
+			                              ->filter((Pair<Tx, Awaitable<Tv>> $k_v) ==> !$k_v[1]->getWaitHandle()->isFinished());
+			$pairwise = $pairwise->concat($stripped_awaitables);
+		}
+		return new self(new PairwiseKC($pairwise));
 	}
 }

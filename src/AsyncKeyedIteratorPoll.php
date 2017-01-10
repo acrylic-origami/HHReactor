@@ -1,27 +1,43 @@
 <?hh // strict
 namespace HHRx;
 use HHRx\Collection\AsyncMapW;
+use HHRx\Collection\VectorW;
 use HHRx\Collection\KeyedContainerWrapper as KC;
-use HHRx\Collection\WeakKeyedContainerWrapper as WeakKC;
+use HHRx\Collection\ExactKeyedContainerWrapper as ExactKC;
 use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
 use HHRx\Collection\MutableKeyedContainerWrapper as MutableKC;
 class AsyncKeyedIteratorPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> { // extends AsyncKeyedPoll<Tk, T>?
 	private AsyncKeyedPoll<mixed, ?(Tk, T)> $poller;
-	public function __construct(private WeakKC<mixed, AsyncKeyedIterator<Tk, T>> $iterators) {
+	public function __construct(private ExactKC<mixed, AsyncKeyedIterator<Tk, T>> $producers) {
 		// convert AsyncKC of Awaitables to Awaitable<AsyncKC<...>> to Awaitable<void>
 		
 		// Container of KeyedIterators -> KC<arraykey, Awaitable<(Tk, T)>>
-		$KC = $iterators->map((AsyncKeyedIterator<Tk, T> $iterator) ==> $iterator->next());
+		$subawaitables = $producers->map((AsyncKeyedIterator<Tk, T> $producer) ==>
+			$producer->next());
 		// KC<arraykey, Awaitable<(Tk, T)>> -> AsyncKC<arraykey, (Tk, T)>
-		$this->poller = new AsyncKeyedPoll($KC);
+		$this->poller = new AsyncKeyedPoll($subawaitables);
 	}
-	public function get_iterators(): WeakKC<mixed, AsyncKeyedIterator<Tk, T>> {
+	public function get_iterators(): ExactKC<mixed, AsyncKeyedIterator<Tk, T>> {
 		// just because we can
-		return $this->iterators;
+		return $this->producers;
 	}
 	public async function next(): Awaitable<?(Tk, T)> {
-		list($k, $next) = await $this->poller->next();
-		$this->poller->extend(async { await $this->iterators->get_units()[$k]->next(); }); // race condition maybe? I don't think so, because control doesn't return to the upper level to call next() to reset internal ConditionWaitHandle.
-		return $next;
+		$poller_next = await $this->poller->next();
+		if(!is_null($poller_next)) {
+			// iteration isn't finished (Poller will return Awaitable<null> iff the totalawaitable is fully finished)
+			$resolved_next = $poller_next[1];
+			if(!is_null($resolved_next)) {
+				// this iterator isn't finished: add the next item to the queue
+				list($k, $_) = $resolved_next;
+				$next = $this->producers->get_units()[$k]->next();
+				$this->poller = AsyncKeyedPoll::merge(Vector{ 
+					$this->poller, 
+					new AsyncKeyedPoll(Vector{ $next })
+				});
+			}
+			return $resolved_next;
+		}
+		else
+			return null;
 	}
 }

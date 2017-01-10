@@ -7,8 +7,8 @@ class LinkedList<T> extends WeakArtificialKeyedIterable<mixed, T> {
 		$this->head = $this->_build_list($list->getIterator());
 	}
 	private function _build_list(Iterator<T> $iterator): ?LinkedListNode<T> {
-		$val = $iterator->current();
 		if($iterator->valid()) {
+			$val = $iterator->current();
 			$iterator->next();
 			$next = $this->_build_list($iterator);
 			if(is_null($next)) {
