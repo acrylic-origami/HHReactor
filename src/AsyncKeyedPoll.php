@@ -29,7 +29,6 @@ class AsyncKeyedPoll<+Tk, +T> implements AsyncKeyedIterator<Tk, T> {
 		// wrap Awaitables in another async that will trigger success of the finish line wait handle
 		try {
 			$v = await $awaitable;
-			var_dump(Pair{$k, $v});
 			$this->race_handle->succeed(tuple($k, $v));
 		}
 		catch(\Exception $e) {
