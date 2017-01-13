@@ -9,14 +9,15 @@ class HTTPStream implements Streamlined<string> {
 	private Stream<string> $local_stream;
 	public function __construct(StreamFactory $stream_factory, private int $port, private string $host = '127.0.0.1') {
 		$server = stream_socket_server(sprintf('tcp://%s:%d', $host, $port));
-		stream_set_blocking($server, 0);
+		stream_set_blocking($server, false);
 		$this->local_stream = $stream_factory->make(async {
 			do {
-				$accepted_stream = stream_socket_accept($server);
-				stream_set_blocking($accepted_stream, 0);
-				$status = await stream_await($accepted_stream, STREAM_AWAIT_READ, 0.0);
+				printf("Construct on port %d\n", $port);
+				$status = await stream_await($server, STREAM_AWAIT_READ, 0.0);
 				if($status === STREAM_AWAIT_READY) {
-					yield stream_get_contents($accepted_stream);
+					$conn = stream_socket_accept($server, 0.0);
+					stream_set_blocking($conn, false);
+					yield stream_get_contents($conn);
 				}
 			}
 			while($status === STREAM_AWAIT_READY);

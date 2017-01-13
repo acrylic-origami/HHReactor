@@ -1,8 +1,12 @@
 {
 	"name": "fog/HHRx",
 	"autoload": {
+		"exclude-from-classmap": ["._"],
 		"psr-4": {
 			"HHRx\\": "src"
 		}
+	},
+	"require": {
+		"fredemmott/hhvm-autoload": "^1.0"
 	}
 }

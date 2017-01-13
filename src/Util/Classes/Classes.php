@@ -1,5 +1,5 @@
 <?hh // decl
-namespace HHRx\Util\Class;
+namespace HHRx\Util\Classes;
 class Classes {
 	public static function parse_classname($name) {
 	  return array(

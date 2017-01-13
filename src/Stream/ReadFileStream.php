@@ -1,14 +1,14 @@
 <?hh // strict
 namespace HHRx\Stream;
 use HHRx\Stream;
+use HHRx\StreamFactory;
 use HHRx\Streamlined;
 use HHRx\KeyedStream;
-
 class ReadFileStream implements Streamlined<string> {
 	private Stream<string> $local_stream;
-	public function __construct(string $f, bool $write_en = false, float $timeout = 0.0) {
+	public function __construct(StreamFactory $stream_factory, string $f, bool $write_en = false, float $timeout = 0.0) {
 		$handle = fopen($f, 'r'.($write_en ? '+' : ''));
-		$this->local_stream = new KeyedStream(async {
+		$this->local_stream = $stream_factory->make(async {
 			do {
 				$status = await stream_await($handle, STREAM_AWAIT_READ, $timeout);
 				do {

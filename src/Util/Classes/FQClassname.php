@@ -1,3 +1,3 @@
 <?hh // strict
-namespace HHRx\Util\Class;
+namespace HHRx\Util\Classes;
 type FQClassname = shape('namespace' => string, 'classname' => string);

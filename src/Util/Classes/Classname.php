@@ -1,3 +1,3 @@
 <?hh // strict
-namespace Util\Class;
+namespace Util\Classes;
 type Classname = shape('namespace' => string, 'classname' => string);
