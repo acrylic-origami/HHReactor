@@ -1,10 +1,6 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Collection\KeyedContainerWrapper as KC;
-use HHRx\Collection\VectorW;
 use HHRx\Collection\KeyedProducer;
-use HHRx\Collection\AsyncKeyedIteratorWrapper;
-use HHRx\Collection\AsyncKeyedContainerWrapper as AsyncKC;
 use HHRx\Collection\EmptyIterable;
 <<__ConsistentConstruct>>
 class KeyedStream<+Tk, +T> {
@@ -30,34 +26,21 @@ class KeyedStream<+Tk, +T> {
 	public function onEnd((function(): Awaitable<void>) $incoming): void {
 		$this->end_subscribers->add($incoming);
 	}
-	public function keyed_transform<Tx super Tk, Tv super T>((function(Tk, T): Pair<Tx, Tv>) $f): KeyedStream<Tx, Tv> {
+	public function keyed_map<Tv>((function(Tk, T): Tv) $f): KeyedStream<Tk, Tv> {
 		return $this->factory->make(async {
 			$producer = clone $this->get_producer();
 			foreach($producer await as $k => $v) {
 				// echo 'TRANSFORM';
 				// var_dump($producer->get_stash());
 				// var_dump($k);
-				list($k, $v) = $f($k, $v);
-				yield $k => $v;
+				$mapped_v = $f($k, $v);
+				yield $k => $mapped_v;
 			}
 		});
 	}
-	// public function merge_with<Tx super Tk, Tr super T>(KeyedStream<Tx, Tr> $incoming): KeyedStream<Tx, Tr> {
-	// 	return self::merge(Vector{ $this, $incoming });
-	// }
-	// public function concat<Tx super Tk, Tr super T>(KeyedStream<Tx, Tr> $incoming): KeyedStream<Tx, Tr> {
-	// 	return new static(new AsyncKeyedIteratorWrapper(async { 
-	// 		foreach($this->get_producer() await as $k => $v) yield $k => $v;
-	// 		foreach($incoming->get_producer() await as $k => $v) yield $k => $v;
-	// 	})); // consider self instead of static
-	// }
-	// public function filter((function(T): bool) $f): KeyedStream<Tk, T> {
-	// 	return new self(new AsyncKeyedIteratorWrapper(async {
-	// 		foreach($this->producer await as $k => $v)
-	// 			if($f($v))
-	// 				yield $k => $v;
-	// 	}));
-	// }
+	public function map<Tv>((function(T): Tv) $f): KeyedStream<Tk, Tv> {
+		return $this->keyed_map((Tk $k, T $v) ==> $f($v));
+	}
 	public function end_with(KeyedStream<mixed, mixed> $incoming): void {
 		$incoming->onEnd(async () ==> {
 			$this->producer = new KeyedProducer(new \HHRx\Collection\EmptyKeyedIterator());

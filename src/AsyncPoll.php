@@ -1,6 +1,5 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Collection\Wrapper;
 use HHRx\Collection\KeyedProducer;
 use HHRx\Asio\ConditionWaitHandleWrapper;
 class AsyncPoll {

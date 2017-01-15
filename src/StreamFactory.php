@@ -1,8 +1,6 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Collection\VectorW;
 use HHRx\Collection\KeyedProducer;
-use HHRx\Collection\AsyncKeyedIteratorWrapper;
 class StreamFactory {
 	private Vector<KeyedStream<mixed, mixed>> $bounded_streams = Vector{};
 	public function __construct(private ?TotalAwaitable $total_awaitable = null) {}
@@ -41,18 +39,25 @@ class StreamFactory {
 			return async {};
 	}
 	public function merge<Tx, Tr>(Iterable<KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
-		// sacrificing `map` here because KeyedContainerWrapper isn't instantiable
 		$producers = Vector{};
 		foreach($incoming as $substream) {
 			$producers->add(clone $substream->get_producer());
 		}
-		return $this->make(AsyncPoll::producer($producers)); // consider self rather than static
+		return $this->make(AsyncPoll::producer($producers));
+	}
+	public function concat<Tx, Tv>(Iterable<KeyedStream<Tx, Tv>> $incoming): KeyedStream<Tx, Tv> {
+		return $this->make(async {
+			$producers = $incoming->map((KeyedStream<Tx, Tv> $stream) ==> clone $stream->get_producer());
+			foreach($producers as $producer)
+				foreach($producer await as $k => $v)
+					yield $k => $v;
+		});
 	}
 	public function just<Tx, Tv>(Awaitable<Tv> $incoming, ?Tx $key = null): KeyedStream<?Tx, Tv> {
 		return $this->make(async {
 			$resolved_incoming = await $incoming;
 			yield $key => $resolved_incoming;
-		}); // consider self rather than static
+		});
 	}
 	public function from<Tx, Tv>(KeyedIterable<Tx, Awaitable<Tv>> $incoming): KeyedStream<Tx, Tv> {
 		return $this->make(async { 
@@ -60,6 +65,6 @@ class StreamFactory {
 				$resolved_awaitable = await $awaitable;
 				yield $k => $resolved_awaitable;
 			}
-		}); // consider self rather than static
+		});
 	}
 }
