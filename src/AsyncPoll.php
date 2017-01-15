@@ -28,6 +28,11 @@ class AsyncPoll {
 				yield $k => $v;
 				await \HH\Asio\later();
 			}
+			try {
+				$race_handle->getWaitHandle()->result();
+				// See similar clause in self::producer() for explanation
+			}
+			catch(\InvalidArgumentException $e) {}
 		}
 		else
 			foreach($subawaitables as $k => $v)
@@ -37,10 +42,12 @@ class AsyncPoll {
 	public static async function producer<Tk, T>(Iterable<KeyedProducer<Tk, T>> $producers): AsyncKeyedIterator<Tk, T> {
 		$race_handle = new ConditionWaitHandleWrapper();
 		$pending_producers = Vector{};
+		$total_awaitable = null;
 		foreach($producers as $producer) {
 			foreach($producer->fast_forward() as $k => $v)
 				yield $k => $v; // this is not a trivial procedure: what if this Iterator is instantiated outside of a `HH\Asio\join`, `next`ed, then control is handed back to the join? 
 			if(!$producer->isFinished()) {
+				// vital that they aren't finished, so that these notifiers won't try to notify the race_handle before we get a chance to `set` it just afterwards
 				$pending_producers->add(async {
 					try {
 						foreach($producer await as $k => $v) {
@@ -57,20 +64,21 @@ class AsyncPoll {
 				$race_handle->set($total_awaitable->getWaitHandle());
 			}
 		}
-		$total_awaitable = async {
-			await \HH\Asio\v($pending_producers);
-		};
-		// WHY??? Why can't I $total_awaitable->getWaitHandle()->isFinished()
-		while(!\HH\Asio\v($pending_producers)->getWaitHandle()->isFinished()) {
+		while(!is_null($total_awaitable) && !$total_awaitable->getWaitHandle()->isFinished()) {
 			invariant(!is_null($race_handle), 'Since this is running, there must be at least one pending producer, so $race_handle can\'t have finished yet.');
 			list($k, $v) = await $race_handle;
 			$race_handle->reset();
 			yield $k => $v;
+			await \HH\Asio\later(); // although the `$total_awaitable` completes here, since the `ConditionWaitHandle` isn't `await`ed, the error doesn't propagate.
+		}
+		if(!is_null($race_handle)) { // then it must be finished by this point
+			// screen for exceptions aside outside of the expected one from the final element ('ConditionWaitHandle not notified by its child')
 			try {
-				await \HH\Asio\later();
+				$race_handle->getWaitHandle()->result();
 			}
 			catch(\InvalidArgumentException $e) {
 				// The last element necessarily triggers this exception during this `later` await, because this `later` pushes this scope behind the last producer's `later` (from the corresponding `_notify` call) in the scheduler, expiring `total_awaitable` and raising `InvalidArgument Exception`. 
+				// We purposefully ignore this Exception, because there's no practical way to avoid resetting it on the final arc of the iteration.
 			}
 		}
 	}

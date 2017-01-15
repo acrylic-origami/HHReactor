@@ -22,7 +22,8 @@ class KeyedProducer<+Tk, +Tv> implements AsyncKeyedIterator<Tk, Tv> {
 			// Protecting against bad calls
 			return null;
 			
-		$v = await $this->iterator->next();
+		$awaitable = $this->iterator->next();
+		$v = await $awaitable;
 		if($this->pointer === $this->stash->count())
 			$this->stash->add($v);
 		$this->pointer++;
