@@ -13,7 +13,8 @@ class KeyedStream<+Tk, +T> {
 	public function __construct(private KeyedProducer<Tk, T> $producer, private StreamFactory $factory) {}
 	public async function run(): Awaitable<void> {
 		foreach($this->producer await as $next) {
-			await \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($next))); // event subscriptions
+			$v = \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($next)));
+			await $v; // event subscriptions
 		}
 		await \HH\Asio\v($this->end_subscribers->map(((function(): Awaitable<void>) $handler) ==> $handler())); // end subscriptions
 	}

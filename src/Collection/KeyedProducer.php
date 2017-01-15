@@ -14,12 +14,28 @@ class KeyedProducer<+Tk, +Tv> implements AsyncKeyedIterator<Tk, Tv> {
 	}
 	public async function next(): Awaitable<?(Tk, Tv)> {
 		// var_dump($this->stash);
-		if($this->pointer < $this->stash->count())
+		if($this->pointer < $this->stash->count()) {
+			// var_dump($this->stash);
 			return $this->stash[$this->pointer++];
+		}
+		if($this->isFinished())
+			// Protecting against bad calls
+			return null;
+			
 		$v = await $this->iterator->next();
 		if($this->pointer === $this->stash->count())
 			$this->stash->add($v);
 		$this->pointer++;
 		return $v;
+	}
+	public function isFinished(): bool {
+		return $this->stash->count() > 0 && is_null($this->stash->lastValue());
+	}
+	public function fast_forward(): KeyedIterator<Tk, Tv> {
+		for(; $this->pointer < $this->stash->count(); $this->pointer++) {
+			$stashed = $this->stash[$this->pointer++];
+			if(!is_null($stashed))
+				yield $stashed[0] => $stashed[1];
+		}
 	}
 }

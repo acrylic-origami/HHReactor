@@ -15,8 +15,8 @@ function subscribe<Tx, Tu>(HHRx\KeyedStream<Tx, Tu> $stream, string $prefix = ''
 $factory = new HHRx\StreamFactory();
 $producers = (new Vector(range(1, 3)))->map((int $v) ==> $factory->make(wait_produce($v)));
 $merged = $factory->merge($producers)->keyed_transform((int $k, int $v) ==> Pair{ $k, 'MERGED '.$v });
-$double_merged = $factory->merge((Vector{ $merged })->concat($producers));
+$double_merged = $factory->merge((Vector{ $merged })->concat($producers))->keyed_transform((int $k, arraykey $v) ==> Pair{ $k, 'DOUBLE-'.$v });
 $producers->map(fun('subscribe'));
 subscribe($merged);
-subscribe($double_merged, 'DOUBLE');
+subscribe($double_merged);
 HH\Asio\join($factory->get_total_awaitable());

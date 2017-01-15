@@ -46,7 +46,7 @@ class StreamFactory {
 		foreach($incoming as $substream) {
 			$producers->add(clone $substream->get_producer());
 		}
-		return $this->make(new AsyncKeyedIteratorPoll($producers)); // consider self rather than static
+		return $this->make(AsyncPoll::producer($producers)); // consider self rather than static
 	}
 	public function just<Tx, Tv>(Awaitable<Tv> $incoming, ?Tx $key = null): KeyedStream<?Tx, Tv> {
 		return $this->make(async {
