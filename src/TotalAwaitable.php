@@ -9,7 +9,7 @@ class TotalAwaitable {
 		$this->subawaitables = new LinkedList(Vector{ $initial });
 		$this->_total_awaitable = (async () ==> {
 			// note: cannot use \HH\Asio\v because a longer awaitable could be added. Also, can't use Vector because Vector complains that it's being changed during iteration
-			foreach($this->subawaitables as $subawaitable)
+			foreach($this->subawaitables->getIterator() as $subawaitable)
 				await $subawaitable;
 		})();
 	}
@@ -23,6 +23,6 @@ class TotalAwaitable {
 		return $this->_total_awaitable;
 	}
 	public function get_static_awaitable(): Awaitable<Vector<void>> {
-		return \HH\Asio\v($this->subawaitables);
+		return \HH\Asio\v($this->subawaitables->getIterator());
 	}
 }

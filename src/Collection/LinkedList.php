@@ -1,6 +1,6 @@
 <?hh // strict
 namespace HHRx\Collection;
-class LinkedList<T> extends WeakArtificialKeyedIterable<mixed, T> {
+class LinkedList<T> { // extends WeakArtificialKeyedIterable<mixed, T>
 	private ?LinkedListNode<T> $head, $tail = null;
 	private int $count = 0;
 	public function __construct(Iterable<T> $list) {
