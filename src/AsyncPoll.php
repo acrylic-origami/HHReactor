@@ -1,6 +1,6 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Collection\KeyedProducer;
+use HHRx\Collection\Producer;
 use HHRx\Asio\ConditionWaitHandleWrapper;
 class AsyncPoll {
 	public static async function awaitable<Tk, T>(KeyedIterable<Tk, Awaitable<T>> $subawaitables): AsyncKeyedIterator<Tk, T> {
@@ -38,19 +38,19 @@ class AsyncPoll {
 				yield $k => $v->getWaitHandle()->result();
 	}
 	private static function fn(): void {}
-	public static async function producer<Tk, T>(Iterable<KeyedProducer<Tk, T>> $producers): AsyncKeyedIterator<Tk, T> {
+	public static async function producer<T>(Iterable<Producer<T>> $producers): AsyncIterator<T> {
 		$race_handle = new ConditionWaitHandleWrapper();
 		$pending_producers = Vector{};
 		$total_awaitable = null;
 		foreach($producers as $producer) {
-			foreach($producer->fast_forward() as $k => $v)
-				yield $k => $v; // this is not a trivial procedure: what if this Iterator is instantiated outside of a `HH\Asio\join`, `next`ed, then control is handed back to the join? 
+			foreach($producer->fast_forward() as $v)
+				yield $v; // this is not a trivial procedure: what if this Iterator is instantiated outside of a `HH\Asio\join`, `next`ed, then control is handed back to the join? 
 			if(!$producer->isFinished()) {
 				// vital that they aren't finished, so that these notifiers won't try to notify the race_handle before we get a chance to `set` it just afterwards
 				$pending_producers->add(async {
 					try {
-						foreach($producer await as $k => $v) {
-							await $race_handle->succeed(tuple($k, $v));
+						foreach($producer await as $v) {
+							await $race_handle->succeed($v);
 						}
 					}
 					catch(\Exception $e) {
@@ -65,9 +65,9 @@ class AsyncPoll {
 		}
 		while(!is_null($total_awaitable) && !$total_awaitable->getWaitHandle()->isFinished()) {
 			invariant(!is_null($race_handle), 'Since this is running, there must be at least one pending producer, so $race_handle can\'t have finished yet.');
-			list($k, $v) = await $race_handle;
+			$v = await $race_handle;
 			$race_handle->reset();
-			yield $k => $v;
+			yield $v;
 			await \HH\Asio\later(); // although the `$total_awaitable` completes here, since the `ConditionWaitHandle` isn't `await`ed, the error doesn't propagate.
 		}
 		if(!is_null($race_handle)) { // then it must be finished by this point

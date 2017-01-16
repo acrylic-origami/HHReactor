@@ -16,7 +16,7 @@ class TotalAwaitable {
 	public function add(Awaitable<void> $incoming): void {
 		$this->subawaitables->add($incoming);
 	}
-	public function add_stream<Tk, Tv>(KeyedStream<Tk, Tv> $incoming): void {
+	public function add_stream<Tv>(Stream<Tv> $incoming): void {
 		$this->subawaitables->add($incoming->run());
 	}
 	public function get_awaitable(): Awaitable<void> {

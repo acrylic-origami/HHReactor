@@ -23,7 +23,7 @@ class HTTPStream implements Streamlined<string> {
 			while($status === STREAM_AWAIT_READY);
 		});
 	}
-	public function get_local_stream(): KeyedStream<mixed, string> {
+	public function get_local_stream(): Stream<string> {
 		return $this->local_stream;
 	}
 }
