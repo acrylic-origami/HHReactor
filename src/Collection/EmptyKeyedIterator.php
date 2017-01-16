@@ -1,8 +1,8 @@
 <?hh // strict
 namespace HHRx\Collection;
 class EmptyKeyedIterator<+Tk, +Tv> implements AsyncKeyedIterator<Tk, Tv> {
-	public function __construct(public string $msg = '') {} 
-	public function next(): Awaitable<?(Tk, Tv)> {
-		throw new \Exception($this->msg);
+	public function __construct() {} 
+	public async function next(): Awaitable<?(Tk, Tv)> {
+		return null;
 	}
 }

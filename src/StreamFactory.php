@@ -1,11 +1,11 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Collection\KeyedProducer;
+use HHRx\Collection\Producer;
 class StreamFactory {
-	private Vector<KeyedStream<mixed, mixed>> $bounded_streams = Vector{};
+	private Vector<Stream<mixed>> $bounded_streams = Vector{};
 	public function __construct(private ?TotalAwaitable $total_awaitable = null) {}
-	public function make<Tk, T>(AsyncKeyedIterator<Tk, T> $raw_producer): KeyedStream<Tk, T> {
-		$stream = new KeyedStream(new KeyedProducer($raw_producer), $this);
+	public function make<Tk, T>(AsyncIterator<T> $raw_producer): Stream<T> {
+		$stream = new Stream(new Producer($raw_producer), $this);
 		$producer_total_awaitable = $stream->run();
 		if(!is_null($this->total_awaitable))
 			$this->total_awaitable->add($producer_total_awaitable);
@@ -13,14 +13,14 @@ class StreamFactory {
 			$this->total_awaitable = new TotalAwaitable($producer_total_awaitable);
 		return $stream;
 	}
-	public function bounded_make<Tk, T>(AsyncKeyedIterator<Tk, T> $raw_producer): KeyedStream<Tk, T> {
-		$stream = new KeyedStream(new KeyedProducer($raw_producer), $this);
+	public function bounded_make<T>(AsyncIterator<T> $raw_producer): Stream<T> {
+		$stream = new Stream(new Producer($raw_producer), $this);
 		// $stream->end_on($this->total_awaitable->get_awaitable()); // bound with the future longest-running query
 		$this->bounded_streams->add($stream);
 		return $stream;
 	}
-	public function static_bounded_make<Tk, T>(AsyncKeyedIterator<Tk, T> $raw_producer): KeyedStream<Tk, T> {
-		$stream = new KeyedStream(new KeyedProducer($raw_producer), $this);
+	public function static_bounded_make<T>(AsyncIterator<T> $raw_producer): Stream<T> {
+		$stream = new Stream(new Producer($raw_producer), $this);
 		if(!is_null($this->total_awaitable))
 			$stream->end_on($this->total_awaitable->get_static_awaitable()); // bound with the current longest-running query. Note that this might still be unbounded if $this->total_awaitable is null
 		return $stream;
@@ -38,32 +38,32 @@ class StreamFactory {
 		else
 			return async {};
 	}
-	public function merge<Tx, Tr>(Iterable<KeyedStream<Tx, Tr>> $incoming): KeyedStream<Tx, Tr> {
+	public function merge<Tr>(Iterable<Stream<Tr>> $incoming): Stream<Tr> {
 		$producers = Vector{};
 		foreach($incoming as $substream) {
 			$producers->add(clone $substream->get_producer());
 		}
 		return $this->make(AsyncPoll::producer($producers));
 	}
-	public function concat<Tx, Tv>(Iterable<KeyedStream<Tx, Tv>> $incoming): KeyedStream<Tx, Tv> {
+	public function concat<Tv>(Iterable<Stream<Tv>> $incoming): Stream<Tv> {
 		return $this->make(async {
-			$producers = $incoming->map((KeyedStream<Tx, Tv> $stream) ==> clone $stream->get_producer());
+			$producers = $incoming->map((Stream<Tv> $stream) ==> clone $stream->get_producer());
 			foreach($producers as $producer)
-				foreach($producer await as $k => $v)
-					yield $k => $v;
+				foreach($producer await as $v)
+					yield $v;
 		});
 	}
-	public function just<Tx, Tv>(Awaitable<Tv> $incoming, ?Tx $key = null): KeyedStream<?Tx, Tv> {
+	public function just<Tv>(Awaitable<Tv> $incoming): Stream<Tv> {
 		return $this->make(async {
 			$resolved_incoming = await $incoming;
-			yield $key => $resolved_incoming;
+			yield $resolved_incoming;
 		});
 	}
-	public function from<Tx, Tv>(KeyedIterable<Tx, Awaitable<Tv>> $incoming): KeyedStream<Tx, Tv> {
+	public function from<Tv>(Iterable<Awaitable<Tv>> $incoming): Stream<Tv> {
 		return $this->make(async { 
-			foreach($incoming as $k => $awaitable) {
+			foreach($incoming as $awaitable) {
 				$resolved_awaitable = await $awaitable;
-				yield $k => $resolved_awaitable;
+				yield $resolved_awaitable;
 			}
 		});
 	}
