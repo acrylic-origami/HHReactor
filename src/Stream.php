@@ -4,49 +4,63 @@ use HHRx\Collection\Producer;
 use HHRx\Collection\EmptyIterable;
 <<__ConsistentConstruct>>
 class Stream<+T> {
-	private Vector<(function(T): Awaitable<void>)> $subscribers = Vector{};
-	private Vector<(function(): Awaitable<void>)> $end_subscribers = Vector{};
+	private Vector<(function(T): Awaitable<mixed>)> $subscribers = Vector{};
+	private Vector<(function(): Awaitable<mixed>)> $end_subscribers = Vector{};
 	public function __construct(private Producer<T> $producer, private StreamFactory $factory) {}
 	public async function run(): Awaitable<void> {
 		foreach($this->producer await as $next) {
-			$v = \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<void>) $handler) ==> $handler($next)));
+			$v = \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<mixed>) $handler) ==> $handler($next)));
 			await $v; // event subscriptions
 		}
-		await \HH\Asio\v($this->end_subscribers->map(((function(): Awaitable<void>) $handler) ==> $handler())); // end subscriptions
+		await \HH\Asio\v($this->end_subscribers->map(((function(): Awaitable<mixed>) $handler) ==> $handler())); // end subscriptions
 	}
 	// public async function get_total_awaitable(): Awaitable<void> {
 	// 	foreach($this->producer await as $_) {}
 	// }
-	public function get_producer(): Producer<T> {
-		return $this->producer;
+	public function clone_producer(): Producer<T> {
+		return clone $this->producer;
 	}
-	public function subscribe((function(T): Awaitable<void>) $incoming): void {
+	public function subscribe((function(T): Awaitable<mixed>) $incoming): void {
 		$this->subscribers->add($incoming);
 	}
-	public function onEnd((function(): Awaitable<void>) $incoming): void {
+	public function onEnd((function(): Awaitable<mixed>) $incoming): void {
 		$this->end_subscribers->add($incoming);
 	}
 	public function map<Tv>((function(T): Tv) $f): Stream<Tv> {
 		return $this->factory->make(async {
-			$producer = clone $this->get_producer();
+			$producer = $this->clone_producer();
 			foreach($producer await as $v) {
 				$mapped_v = $f($v);
 				yield $mapped_v;
 			}
 		});
 	}
-	public function buffer(Producer<mixed> $signal): Stream<\ConstVector<T>> {
+	public function buffer(Stream<mixed> $signal): Stream<\ConstVector<T>> {
 		return $this->factory->make(async {
-			$producer = clone $this->producer;
-			foreach($signal await as $_)
+			$producer = $this->clone_producer();
+			foreach($signal->clone_producer() await as $_)
 				yield new Vector($producer->fast_forward());
 		});
 	}
-	// public function collapse(): Awaitable<KeyedContainer<Tk, T>> {
-	// 	$M = Map{};
-	// 	$this->subscribe(inst_meth($M, 'set'));
-		
-	// }
+	public async function await_end(): Awaitable<void> {
+		$wait_handle = ConditionWaitHandle::create($this->factory->get_total_awaitable()->getWaitHandle()); // assume getWaitHandle doesn't freeze the total_awaitable to the current linked list of subawaitables (which doesn't even make sense to say)
+		$this->onEnd(async () ==> {
+			// this is an end handler of this stream, so this adds to the wait of total_awaitable.
+			// The `later` call ensures that waiting the local $wait_handle below executes before the end handlers do => before total_awaitable.
+			// Note that $wait_handle is local, so this is the only possible resolver.
+			$wait_handle->succeed(null);
+			await \HH\Asio\later();
+		});
+		await $wait_handle;
+	}
+	public async function collapse(): Awaitable<\ConstVector<T>> {
+		$accumulator = Vector{};
+		$this->subscribe(async (T $v) ==> { 
+			$accumulator->add($v);
+		});
+		await $this->await_end();
+		return $accumulator;
+	}
 	public function end_with(Stream<mixed> $incoming): void {
 		$incoming->onEnd(inst_meth($this->producer, 'halt')); // halt with null to signal iterator end);
 	}
@@ -57,9 +71,4 @@ class Stream<+T> {
 		}));
 	}
 	// An empty method doesn't make sense: for classes that use KeyedStream, make this KeyedStream nullable, null representing an empty stream
-	// public static function empty(): KeyedStream<Tk, T> {
-	// 	return new static(async{ 
-	// 		while(true) {}
-	// 	}); // consider self rather than static
-	// }
 }

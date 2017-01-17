@@ -41,13 +41,13 @@ class StreamFactory {
 	public function merge<Tr>(Iterable<Stream<Tr>> $incoming): Stream<Tr> {
 		$producers = Vector{};
 		foreach($incoming as $substream) {
-			$producers->add(clone $substream->get_producer());
+			$producers->add($substream->clone_producer());
 		}
 		return $this->make(AsyncPoll::producer($producers));
 	}
 	public function concat<Tv>(Iterable<Stream<Tv>> $incoming): Stream<Tv> {
 		return $this->make(async {
-			$producers = $incoming->map((Stream<Tv> $stream) ==> clone $stream->get_producer());
+			$producers = $incoming->map((Stream<Tv> $stream) ==> $stream->clone_producer());
 			foreach($producers as $producer)
 				foreach($producer await as $v)
 					yield $v;
@@ -66,5 +66,15 @@ class StreamFactory {
 				yield $resolved_awaitable;
 			}
 		});
+	}
+	public function tick(int $period): Stream<int> {
+		$stream = $this->make(async {
+			for($i = 0; ; $i++) {
+				await \HH\Asio\usleep($period);
+				yield $i;
+			}
+		});
+		$stream->end_on($this->get_total_awaitable());
+		return $stream;
 	}
 }
