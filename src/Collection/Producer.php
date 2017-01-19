@@ -3,26 +3,26 @@ namespace HHRx\Collection;
 <<__ConsistentConstruct>>
 // MUST CLONE TO SEPARATE POINTERS
 class Producer<+T> implements AsyncIterator<T> {
-	private MarchingLinkedList<?(mixed, T)> $lag;
+	private LinkedList<?(mixed, T)> $lag;
 	private AsyncIteratorWrapper<T> $iterator;
 	private ?Haltable<?(mixed, T)> $haltable = null;
 	private bool $finished = false;
 	public function __construct(AsyncIterator<T> $raw_iterator) {
 		$this->iterator = new AsyncIteratorWrapper($raw_iterator);
-		$this->lag = new MarchingLinkedList();
+		$this->lag = new LinkedList();
 	}
 	public function __clone(): void {
 		$this->lag = clone $this->lag;
 	}
 	public async function next(): Awaitable<?(mixed, T)> {
-		$ret = $this->lag->next(); // try lag first
-		if(!is_null($ret))
-			return $ret;
+		if(!$this->lag->is_empty())
+			// fast-forward
+			return $this->lag->shift();
 		else {
-			// lag is empty, or storing null from finished producer
 			$this->haltable = new Haltable($this->iterator->next());
 			$ret = await $this->haltable;
 			$this->lag->add($ret);
+			$this->lag->shift(); // broadcast $ret to shared producers, but keep this one at the cutting edge
 			return $ret;
 		}
 	}
@@ -36,10 +36,10 @@ class Producer<+T> implements AsyncIterator<T> {
 	// }
 	public function fast_forward(): Iterator<T> {
 		// no risk of "Generator already started" or "Changed during iteration" exceptions, because there are no underlying core Hack collections in LinkedList iterables
-		$next = $this->lag->next();
-		while(!is_null($next)) {
-			yield $next[1];
-			$next = $this->lag->next();
+		while(!$this->lag->is_empty()) {
+			$next = $this->lag->shift();
+			if(!is_null($next))
+				yield $next[1];
 		}
 	}
 }

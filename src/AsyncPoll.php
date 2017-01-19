@@ -49,10 +49,16 @@ class AsyncPoll {
 			// [OBSOLETE] // vital that they aren't finished, so that these notifiers won't try to notify the race_handle before we get a chance to `set` it just afterwards
 			
 			$pending_producers->add(async {
-				await \HH\Asio\later(); // even if this producer is totally resolved, defer until we reach the top join again, so that race handle can first be set
+				await \HH\Asio\later(); // even if this producer is totally resolved, defer until we reach the top join again. This is so that race handle can be guaranteed to be primed.
 				try {
-					foreach($producer await as $v) {
-						await $race_handle->succeed($v);
+					// foreach($producer await as $v) {
+					while(true) {
+						$next = await $producer->next();
+						self::fn();
+						if(!is_null($next))
+							await $race_handle->succeed($next[1]);
+						else
+							break;
 					}
 				}
 				catch(\Exception $e) {
@@ -69,9 +75,9 @@ class AsyncPoll {
 			$v = await $race_handle;
 			$race_handle->reset();
 			yield $v;
-			await \HH\Asio\later(); // although the `$total_awaitable` completes here, since the `ConditionWaitHandle` isn't `await`ed, the error doesn't propagate.
+			await \HH\Asio\later(); // although the `$total_awaitable` completes here, since the `ConditionWaitHandle` isn't `await`ed, the 'not notified by child...' error doesn't propagate...
 		}
-		if(!is_null($race_handle)) { // then it must be finished by this point
+		if(!is_null($race_handle)) { // ...so it must be finished by this point
 			// screen for exceptions aside outside of the expected one from the final element ('ConditionWaitHandle not notified by its child')
 			try {
 				$race_handle->getWaitHandle()->result();
