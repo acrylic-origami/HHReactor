@@ -1,12 +1,12 @@
 <?hh // strict
 namespace HHRx;
-use HHRx\Collection\LinkedList;
+use HHRx\Collection\SimpleLinkedList;
 // type EventHandler = (function((function(): Awaitable<void>)): void);
 class TotalAwaitable {
 	private Awaitable<void> $_total_awaitable;
-	private LinkedList<Awaitable<void>> $subawaitables; // note: $subawaitables is append-only.
+	private SimpleLinkedList<Awaitable<void>> $subawaitables; // note: $subawaitables is append-only.
 	public function __construct(Awaitable<void> $initial) {
-		$this->subawaitables = new LinkedList(Vector{ $initial });
+		$this->subawaitables = new SimpleLinkedList(Vector{ $initial });
 		$this->_total_awaitable = (async () ==> {
 			// note: cannot use \HH\Asio\v because a longer awaitable could be added. Also, can't use Vector because Vector complains that it's being changed during iteration
 			foreach($this->subawaitables->getIterator() as $subawaitable)

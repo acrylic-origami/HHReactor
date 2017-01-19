@@ -45,23 +45,24 @@ class AsyncPoll {
 		foreach($producers as $producer) {
 			foreach($producer->fast_forward() as $v)
 				yield $v; // this is not a trivial procedure: what if this Iterator is instantiated outside of a `HH\Asio\join`, `next`ed, then control is handed back to the join? 
-			if(!$producer->isFinished()) {
-				// vital that they aren't finished, so that these notifiers won't try to notify the race_handle before we get a chance to `set` it just afterwards
-				$pending_producers->add(async {
-					try {
-						foreach($producer await as $v) {
-							await $race_handle->succeed($v);
-						}
+			// if(!$producer->isFinished()) {}
+			// [OBSOLETE] // vital that they aren't finished, so that these notifiers won't try to notify the race_handle before we get a chance to `set` it just afterwards
+			
+			$pending_producers->add(async {
+				await \HH\Asio\later(); // even if this producer is totally resolved, defer until we reach the top join again, so that race handle can first be set
+				try {
+					foreach($producer await as $v) {
+						await $race_handle->succeed($v);
 					}
-					catch(\Exception $e) {
-						await $race_handle->fail($e);
-					}
-				});
-				$total_awaitable = async {
-					await \HH\Asio\v($pending_producers);
-				};
-				$race_handle->set($total_awaitable->getWaitHandle());
-			}
+				}
+				catch(\Exception $e) {
+					await $race_handle->fail($e);
+				}
+			});
+			$total_awaitable = async {
+				await \HH\Asio\v($pending_producers);
+			};
+			$race_handle->set($total_awaitable->getWaitHandle());
 		}
 		while(!is_null($total_awaitable) && !$total_awaitable->getWaitHandle()->isFinished()) {
 			invariant(!is_null($race_handle), 'Since this is running, there must be at least one pending producer, so $race_handle can\'t have finished yet.');

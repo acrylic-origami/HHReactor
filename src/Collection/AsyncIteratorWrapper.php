@@ -7,7 +7,17 @@ class AsyncIteratorWrapper<+T> implements AsyncIterator<T>, IHaltable {
 		$handle = $this->handle;
 		if(is_null($handle) || $handle->getWaitHandle()->isFinished()) {
 			// refresh the handle if this is the first `next` call or the underlying awaitable has resolved
-			$this->handle = new Haltable($this->iterator->next());
+			try {
+				$pending_next = $this->iterator->next();
+			}
+			catch(\Exception $e) {
+				if($e->getMessage() !== 'Generator is already finished')
+					throw $e;
+				else
+					// for AsyncGenerators, continue issuing iterator termination signal
+					return async { return null; };
+			}
+			$this->handle = new Haltable($pending_next);
 			return $this->handle;
 		}
 		else

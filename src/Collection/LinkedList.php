@@ -1,48 +1,45 @@
 <?hh // strict
 namespace HHRx\Collection;
-class LinkedList<T> { // extends WeakArtificialKeyedIterable<mixed, T>
-	private ?LinkedListNode<T> $head, $tail = null;
-	private int $count = 0;
-	public function __construct(Iterable<T> $list) {
-		$this->head = $this->_build_list($list->getIterator());
+abstract class LinkedList<T, TNode as LinkedListNode<T>> { // extends WeakArtificialKeyedIterable<mixed, T>
+	protected Wrapper<?TNode> $head, $tail;
+	public function __construct(Iterable<T> $list, protected classname<TNode> $node_class) {
+		$this->tail = new Wrapper(null);
+		$this->head = new Wrapper($this->_build_list($list->getIterator()));
 	}
-	private function _build_list(Iterator<T> $iterator): ?LinkedListNode<T> {
+	private function _build_list(Iterator<T> $iterator): ?TNode {
 		if($iterator->valid()) {
 			$val = $iterator->current();
 			$iterator->next();
 			$next = $this->_build_list($iterator);
 			if(is_null($next)) {
-				$this->tail = new LinkedListNode(null, $val);
-				return $this->tail;
+				$this->tail->set($this->make_node(null, $val));
+				return $this->tail->get();
 			}
-			return new LinkedListNode($next, $val);
+			return $this->make_node($next, $val);
 		}
 		else {
 			return null;
 		}
 	}
-	public function count(): int {
-		return $this->count;
+	public function is_empty(): bool {
+		return is_null($this->head);
+	}
+	protected function make_node(?TNode $next, T $v): TNode {
+		$node_class = $this->node_class;
+		/* HH_FIXME[4110] Because all implementations pass $node_class with exactly TNode::class, this is safe. Waiting for equality type constraints to truly enforce this. */
+		return new $node_class($next, $v);
 	}
 	public function add(T $incoming): void {
 		$tail = $this->tail;
-		$next = new LinkedListNode(null, $incoming);
+		$next = $this->make_node(null, $incoming);
 		if(is_null($tail)) {
-			$this->head = $next;
+			$this->head->set($next);
 		}
 		else {
-			$tail->next = $next;
+			/* HH_FIXME[4110] Because all implementations pass $node_class with exactly TNode::class, this is safe. Waiting for equality type constraints to truly enforce this. */
+			$tail->set_next($next);
 		}
-		$this->tail = $next;
-		$this->count++;
-	}
-	public function getIterator(): KeyedIterator<mixed, T> {
-		if(!is_null($this->head)) {
-			$node = $this->head;
-			while(!is_null($node)) {
-				yield $node->v;
-				$node = $node->next;
-			}
-		}
+		// advance tail pointer
+		$this->tail->set($next);
 	}
 }

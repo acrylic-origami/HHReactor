@@ -3,44 +3,43 @@ namespace HHRx\Collection;
 <<__ConsistentConstruct>>
 // MUST CLONE TO SEPARATE POINTERS
 class Producer<+T> implements AsyncIterator<T> {
-	private Vector<?(mixed, T)> $stash = Vector{};
-	private int $pointer = 0;
+	private MarchingLinkedList<?(mixed, T)> $lag;
 	private AsyncIteratorWrapper<T> $iterator;
 	private ?Haltable<?(mixed, T)> $haltable = null;
+	private bool $finished = false;
 	public function __construct(AsyncIterator<T> $raw_iterator) {
 		$this->iterator = new AsyncIteratorWrapper($raw_iterator);
+		$this->lag = new MarchingLinkedList();
+	}
+	public function __clone(): void {
+		$this->lag = clone $this->lag;
 	}
 	public async function next(): Awaitable<?(mixed, T)> {
-		if($this->pointer < $this->stash->count()) {
-			return $this->stash[$this->pointer++];
+		$ret = $this->lag->next(); // try lag first
+		if(!is_null($ret))
+			return $ret;
+		else {
+			// lag is empty, or storing null from finished producer
+			$this->haltable = new Haltable($this->iterator->next());
+			$ret = await $this->haltable;
+			$this->lag->add($ret);
+			return $ret;
 		}
-		if($this->isFinished())
-			// Protecting against bad calls
-			return null;
-			
-		$awaitable = $this->iterator->next();
-		// $v = await $awaitable;
-		$this->haltable = new Haltable($awaitable);
-		$v = await $this->haltable;
-		
-		if($this->pointer === $this->stash->count())
-			$this->stash->add($v);
-		$this->pointer++;
-		return $v;
 	}
 	public async function halt(?\Exception $e = null): Awaitable<void> {
 		$haltable = $this->haltable;
 		invariant(!is_null($haltable), 'Attempted to halt producer before starting iteration.');
 		await $haltable->halt($e);
 	}
-	public function isFinished(): bool {
-		return $this->stash->count() > 0 && is_null($this->stash->lastValue());
-	}
+	// public function isFinished(): bool {
+	// 	return $this->lag->is_empty() && 
+	// }
 	public function fast_forward(): Iterator<T> {
-		for(; $this->pointer < $this->stash->count(); $this->pointer++) {
-			$stashed = $this->stash[$this->pointer++];
-			if(!is_null($stashed))
-				yield $stashed[1];
+		// no risk of "Generator already started" or "Changed during iteration" exceptions, because there are no underlying core Hack collections in LinkedList iterables
+		$next = $this->lag->next();
+		while(!is_null($next)) {
+			yield $next[1];
+			$next = $this->lag->next();
 		}
 	}
 }

@@ -4,7 +4,7 @@ async function wait_produce(int $i): AsyncKeyedIterator<int, int> {
 	await HH\Asio\usleep(10000); // non-blocking 10ms
 	yield $i => $i;
 }
-function subscribe<Tx, Tu>(HHRx\KeyedStream<Tx, Tu> $stream, string $prefix = ''): void {
+function subscribe<Tu>(HHRx\Stream<Tu> $stream, string $prefix = ''): void {
 	$stream->subscribe(async (Tu $v) ==> {
 		usleep(100000); // intentionally BLOCKING 100ms
 		                // represents a long unit of work

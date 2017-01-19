@@ -61,11 +61,11 @@ class Stream<+T> {
 		await $this->await_end();
 		return $accumulator;
 	}
-	public function end_with(Stream<mixed> $incoming): void {
+	public function using(Stream<mixed> $incoming): void {
 		$incoming->onEnd(inst_meth($this->producer, 'halt')); // halt with null to signal iterator end);
 	}
 	public function end_on(Awaitable<mixed> $bound): void {
-		$this->end_with($this->factory->make(async { 
+		$this->using($this->factory->make(async { 
 			$resolved_bound = await $bound;
 			yield $resolved_bound;
 		}));

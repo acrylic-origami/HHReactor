@@ -2,26 +2,37 @@
 namespace HHRx\Collection;
 class Haltable<+T> implements Awaitable<?T>, IHaltable {
 	private ConditionWaitHandle<?T> $handle;
+	private Awaitable<Vector<?T>> $vec;
 	public function __construct(private Awaitable<?T> $awaitable) {
+		// Two workarounds:
+		// One for ConditionWaitHandle not accepting Awaitable<mixed>
 		$void_awaitable = async {
-			await $awaitable;
+			await \HH\Asio\later();
+			await $this->awaitable;
+		};
+		// One for no \HH\Asio\va yet
+		$null_awaitable = async {
+			await $void_awaitable;
+			return null;
 		};
 		$this->handle = ConditionWaitHandle::create($void_awaitable->getWaitHandle());
-	}
-	public function getWaitHandle(): WaitHandle<?T> {
-		$vec = \HH\Asio\v(Vector{
+		$this->vec = \HH\Asio\v(Vector{
+			$null_awaitable,
 			async {
-				await \HH\Asio\later();
 				return await $this->handle;
 			}, async {
 				$v = await $this->awaitable;
-				$this->handle->succeed($v);
+				if(!$this->handle->isFinished())
+					// else we were beat to the punch by a `halt` call
+					$this->handle->succeed($v);
 				return null; // currently a limitation of \Asio\v, waiting for Asio\va (variadic)
 			}
 		});
+	}
+	public function getWaitHandle(): WaitHandle<?T> {
 		$T_awaitable = async {
-			$resolved_vec = await $vec;
-			return $resolved_vec[0];
+			$T = await $this->vec;
+			return $T[1];
 		};
 		return $T_awaitable->getWaitHandle();
 	}
