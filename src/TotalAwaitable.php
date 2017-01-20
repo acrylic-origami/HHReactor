@@ -21,13 +21,11 @@ class TotalAwaitable {
 	}
 	public function add(Awaitable<void> $incoming): void {
 		$this->subhandles->add($incoming->getWaitHandle());
-		if(!is_null($this->partial))
+		if(!$this->partial->getWaitHandle()->isFinished())
 			$this->partial->soft_halt(); // reset the internal wait handle so that the new element is await-ed immediately
 	}
 	public function add_stream<Tv>(Stream<Tv> $incoming): void {
-		$this->subhandles->add($incoming->run()->getWaitHandle());
-		if(!is_null($this->partial))
-			$this->partial->soft_halt(); // reset the internal wait handle so that the new element is await-ed immediately
+		$this->add($incoming->run());
 	}
 	public function get_awaitable(): Awaitable<void> {
 		return $this->total_awaitable;

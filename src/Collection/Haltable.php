@@ -37,13 +37,19 @@ class Haltable<+T> implements Awaitable<?T>, IHaltable {
 		return $T_awaitable->getWaitHandle();
 	}
 	public async function halt(?\Exception $e = null): Awaitable<void> {
-		$this->soft_halt($e);
-		await \HH\Asio\later();
-	}
-	public function soft_halt(?\Exception $e = null): void {
+		// to be used in async code, where idempotency is not expected, and instant propagation is
 		if(!is_null($e))
 			$this->handle->fail($e);
 		else
 			$this->handle->succeed(null);
+		await \HH\Asio\later();
+	}
+	public function soft_halt(?\Exception $e = null): void {
+		// to be used in synchronous code, where idempotent behaviour is expected
+		if(!$this->handle->isFinished())
+			if(!is_null($e))
+				$this->handle->fail($e);
+			else
+				$this->handle->succeed(null);
 	}
 }
