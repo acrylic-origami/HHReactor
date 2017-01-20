@@ -3,7 +3,7 @@ namespace HHRx\Collection;
 class Haltable<+T> implements Awaitable<?T>, IHaltable {
 	private ConditionWaitHandle<?T> $handle;
 	private Awaitable<Vector<?T>> $vec;
-	public function __construct(private Awaitable<?T> $awaitable) {
+	public function __construct(private Awaitable<T> $awaitable) {
 		// Two workarounds:
 		// One for ConditionWaitHandle not accepting Awaitable<mixed>
 		$void_awaitable = async {
@@ -37,10 +37,13 @@ class Haltable<+T> implements Awaitable<?T>, IHaltable {
 		return $T_awaitable->getWaitHandle();
 	}
 	public async function halt(?\Exception $e = null): Awaitable<void> {
+		$this->soft_halt($e);
+		await \HH\Asio\later();
+	}
+	public function soft_halt(?\Exception $e = null): void {
 		if(!is_null($e))
 			$this->handle->fail($e);
 		else
 			$this->handle->succeed(null);
-		await \HH\Asio\later();
 	}
 }

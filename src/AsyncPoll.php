@@ -52,14 +52,8 @@ class AsyncPoll {
 				await \HH\Asio\later(); // even if this producer is totally resolved, defer until we reach the top join again. This is so that race handle can be guaranteed to be primed.
 				try {
 					// foreach($producer await as $v) {
-					while(true) {
-						$next = await $producer->next();
-						self::fn();
-						if(!is_null($next))
-							await $race_handle->succeed($next[1]);
-						else
-							break;
-					}
+					foreach($producer await as $next)
+						await $race_handle->succeed($next);
 				}
 				catch(\Exception $e) {
 					await $race_handle->fail($e);

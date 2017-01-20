@@ -19,7 +19,8 @@ class Producer<+T> implements AsyncIterator<T> {
 			// fast-forward
 			return $this->lag->shift();
 		else {
-			$this->haltable = new Haltable($this->iterator->next());
+			$next = $this->iterator->next();
+			$this->haltable = new Haltable($next);
 			$ret = await $this->haltable;
 			$this->lag->add($ret);
 			$this->lag->shift(); // broadcast $ret to shared producers, but keep this one at the cutting edge

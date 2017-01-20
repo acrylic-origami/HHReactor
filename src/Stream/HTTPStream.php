@@ -14,6 +14,7 @@ class HTTPStream implements Streamlined<string> {
 			do {
 				printf("Construct on port %d\n", $port);
 				$status = await stream_await($server, STREAM_AWAIT_READ, 0.0);
+				printf("Recv on port %d\n", $port);
 				if($status === STREAM_AWAIT_READY) {
 					$conn = stream_socket_accept($server, 0.0);
 					stream_set_blocking($conn, false);
