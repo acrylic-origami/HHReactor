@@ -60,12 +60,7 @@ class StreamFactory {
 		});
 	}
 	public function from<Tv>(Iterable<Awaitable<Tv>> $incoming): Stream<Tv> {
-		return $this->make(async { 
-			foreach($incoming as $awaitable) {
-				$resolved_awaitable = await $awaitable;
-				yield $resolved_awaitable;
-			}
-		});
+		return $this->make(AsyncPoll::awaitable($incoming));
 	}
 	public function tick(int $period): Stream<int> {
 		$stream = $this->make(async {

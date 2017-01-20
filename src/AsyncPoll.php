@@ -3,14 +3,14 @@ namespace HHRx;
 use HHRx\Collection\Producer;
 use HHRx\Asio\ConditionWaitHandleWrapper;
 class AsyncPoll {
-	public static async function awaitable<Tk, T>(KeyedIterable<Tk, Awaitable<T>> $subawaitables): AsyncKeyedIterator<Tk, T> {
+	public static async function awaitable<T>(Iterable<Awaitable<T>> $subawaitables): AsyncIterator<T> {
 		$race_handle = new ConditionWaitHandleWrapper(); // ?Wrapper<ConditionWaitHandle>
 		$pending_subawaitables = 
-			$subawaitables->filterWithKey((Tk $k, Awaitable<T> $v) ==> !$v->getWaitHandle()->isFinished())
-			              ->mapWithKey(async (Tk $k, Awaitable<T> $v) ==> {
+			$subawaitables->filter((Awaitable<T> $v) ==> !$v->getWaitHandle()->isFinished())
+			              ->map(async (Awaitable<T> $v) ==> {
 			              		try {
 				              		$resolved_v = await $v;
-				              		await $race_handle->succeed(tuple($k, $resolved_v));
+				              		await $race_handle->succeed($resolved_v);
 				              	}
 				              	catch(\Exception $e) {
 				              		await $race_handle->fail($e);
@@ -18,13 +18,13 @@ class AsyncPoll {
 			              	});
 		if(!is_null($pending_subawaitables->firstValue())) {
 			$total_awaitable = async {
-				await \HH\Asio\m($pending_subawaitables);
+				await \HH\Asio\v($pending_subawaitables);
 			};
 			$race_handle->set($total_awaitable->getWaitHandle());
 			while(!$total_awaitable->getWaitHandle()->isFinished()) {
-				list($k, $v) = await $race_handle;
+				$v = await $race_handle;
 				$race_handle->reset();
-				yield $k => $v;
+				yield $v;
 				await \HH\Asio\later();
 			}
 			try {
@@ -34,8 +34,8 @@ class AsyncPoll {
 			catch(\InvalidArgumentException $e) {}
 		}
 		else
-			foreach($subawaitables as $k => $v)
-				yield $k => $v->getWaitHandle()->result();
+			foreach($subawaitables as $v)
+				yield $v->getWaitHandle()->result();
 	}
 	private static function fn(): void {}
 	public static async function producer<T>(Iterable<Producer<T>> $producers): AsyncIterator<T> {

@@ -6,5 +6,6 @@ composer.phar
 # composer.lock
 
 *.sublime-workspace
+*.sublime-project
 ._*
 .DS_Store
