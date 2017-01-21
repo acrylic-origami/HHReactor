@@ -37,7 +37,6 @@ class AsyncPoll {
 			foreach($subawaitables as $v)
 				yield $v->getWaitHandle()->result();
 	}
-	private static function fn(): void {}
 	public static async function producer<T>(Iterable<Producer<T>> $producers): AsyncIterator<T> {
 		$race_handle = new ConditionWaitHandleWrapper();
 		$pending_producers = Vector{};
@@ -52,8 +51,9 @@ class AsyncPoll {
 				await \HH\Asio\later(); // even if this producer is totally resolved, defer until we reach the top join again. This is so that race handle can be guaranteed to be primed.
 				try {
 					// foreach($producer await as $v) {
-					foreach($producer await as $next)
+					foreach($producer await as $next) {
 						await $race_handle->succeed($next);
+					}
 				}
 				catch(\Exception $e) {
 					await $race_handle->fail($e);

@@ -5,6 +5,8 @@ $factory = new HHRx\StreamFactory();
 $stream = $factory->merge(Vector{ $factory->make(async {
 	await \HH\Asio\later();
 	yield 1;
+	await \HH\Asio\later();
+	yield 2;
 }) });
 // HH\Asio\join(async {
 // 	f();
@@ -12,5 +14,7 @@ $stream = $factory->merge(Vector{ $factory->make(async {
 // 		var_dump($v);
 // 	}
 // });
-$stream->subscribe(async (int $v) ==> var_dump($v));
+$stream->subscribe(async (int $v) ==> {
+	printf("V: %d\n", $v);
+});
 \HH\Asio\join($factory->get_total_awaitable());

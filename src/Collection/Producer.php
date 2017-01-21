@@ -14,20 +14,22 @@ class Producer<+T> implements AsyncIterator<T> {
 	public function __clone(): void {
 		$this->lag = clone $this->lag;
 	}
+	public function get_iterator(): AsyncIteratorWrapper<T> {
+		return $this->iterator;
+	}
 	public async function next(): Awaitable<?(mixed, T)> {
-		if(!$this->lag->is_empty())
-			// fast-forward
-			return $this->lag->shift();
-		else {
+		if($this->lag->is_empty()) {
+			// we're on the cutting edge, await next
 			$next = $this->iterator->next();
 			$this->haltable = new Haltable($next);
 			$ret = await $this->haltable;
-			if($this->lag->is_empty())
-				$this->lag->add($ret); // broadcast $ret to shared producers
 			
-			$this->lag->shift();
-			return $ret;
+			// we might not be the first to resolve, check first:
+			if($this->lag->is_empty()) {
+				$this->lag->add($ret); // broadcast to other producers (including this one)
+			}
 		}
+		return $this->lag->shift(); // this is guaranteed by the above to never be empty
 	}
 	public async function halt(?\Exception $e = null): Awaitable<void> {
 		$haltable = $this->haltable;
