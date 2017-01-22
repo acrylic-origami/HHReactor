@@ -8,29 +8,39 @@ HHRx implements Reactive extensions in **pure strict Hack**, using solely `Await
 
 ### By example
 
-```php
+```hack
 <?hh // partial
-use HHRx\StreamFactory;
-$factory = new StreamFactory();
-$delays = Vector{ 300, 400, 1000 }; // delays in ms
-$streams = $delays->map((int $delay) ==> $factory->tick($delay * 1000)) // convert to us
-                  ->map((int $delay) ==> sprintf('Waited %d us', $delay)); // transform emitted values
-
+require_once(__DIR__ . '/../vendor/hh_autoload.php');
+async function f<T>(T $v): AsyncIterator<T> {
+	await HH\Asio\later();
+	yield $v;
+}
+$factory = new HHRx\StreamFactory();
+$streams = Vector{ $factory->make(f(1)), $factory->make(f(2)) };
 // NOTE the factory performing the merge
 $river = $factory->merge($streams);
-// ... but the stream performing `end_on`,
-// since it mutates the stream.
-$river->end_on(\HH\Asio\usleep(10 * 1000000)); // 10s
 
-// NOTE the async handler, which is that 
-// way for generality (and for some 
-// internal behavior).
-$river->subscribe(
-	async (string $delay_msg) ==> var_dump($delay_msg)
-);
+$streams->mapWithKey((int $k, HHRx\Stream $stream) ==> {
+	// NOTE the async handler, which is that 
+	// way for generality (and for some 
+	// internal behavior).
+	$stream->subscribe(async (int $v) ==> {
+		printf("Stream %d: %d\n", $k, $v);
+	});
+	$stream->onEnd(async () ==> {
+		printf("Stream %d: END\n", $k);
+	});
+});
+
+$river->subscribe(async (int $v) ==> {
+	printf("River: %d\n", $v);
+});
+$river->onEnd(async () ==> {
+	echo "RIVER: END\n";
+});
 
 // Kick off the application
-HH\Asio\join($factory->get_total_awaitable());
+\HH\Asio\join($factory->get_total_awaitable());
 ```
 
 ### By component
@@ -83,7 +93,7 @@ Await-async is a [cooperative-multitasking model](http://hhvm.com/blog/7091/asyn
 
 Some `Awaitable`s that complete right away do not yield control to the calling scope when `await`ed. For example, there is no ambiguity to the order the following prints:
 
-```php
+```hack
 <?hh // partial
 HH\Asio\join(HH\Asio\v(Vector{
 	async {
