@@ -10,19 +10,26 @@ class StreamFactory {
 	public function make<Tk, T>(AsyncIterator<T> $raw_producer): Stream<T> {
 		$stream = new Stream(new Producer($raw_producer), $this);
 		$producer_total_awaitable = $stream->run();
+		var_dump($producer_total_awaitable);
 		$this->total_awaitable->add($producer_total_awaitable);
 		return $stream;
 	}
-	public function bounded_make<T>(AsyncIterator<T> $raw_producer): Stream<T> {
+	public function bounded_make<T>(AsyncIterator<T> $raw_producer, ?Awaitable<mixed> $end_signal = null): Stream<T> {
 		$stream = new Stream(new Producer($raw_producer), $this);
-		// $stream->end_on($this->total_awaitable->get_awaitable()); // bound with the future longest-running query
-		$this->bounded_streams->add($stream);
+		if(!is_null($end_signal)) {
+			$stream->end_on($end_signal);
+			$producer_total_awaitable = $stream->run(); // instead of using end_signal; this is end-safe (else end subscribers may not get called)
+			$this->total_awaitable->add($producer_total_awaitable);
+		}
+		else {
+			$this->bounded_streams->add($stream); // bound to total application lifetime
+		}
 		return $stream;
 	}
 	// public function static_bounded_make<T>(AsyncIterator<T> $raw_producer): Stream<T> {
 	// 	$stream = new Stream(new Producer($raw_producer), $this);
 	// 	if(!is_null($this->total_awaitable))
-	// 		$stream->end_on($this->total_awaitable->get_static_awaitable()); // bound with the current longest-running query. Note that this might still be unbounded if $this->total_awaitable is null
+	// 		$stream->end_on($this->total_awaitable->await_current()); // bound with the current longest-running Awaitable if one exists
 	// 	return $stream;
 	// }
 	public function get_total_awaitable(): Awaitable<void> { // not totally keen on this public getter
@@ -30,8 +37,10 @@ class StreamFactory {
 		$total_awaitable = $this->total_awaitable;
 		if(!is_null($total_awaitable)) {
 			foreach($this->bounded_streams as $bounded_stream)
-				$bounded_stream->end_on($total_awaitable->get_awaitable()); // bound with the future longest-running query
-			return $total_awaitable->get_awaitable();
+				$bounded_stream->end_on($total_awaitable); // bound with the future longest-running Awaitable
+			return async {
+				await $total_awaitable;
+			};
 		}
 		elseif($this->bounded_streams->count() > 0)
 			throw new \RuntimeException('Streams were bounded by the upper-bound Awaitable from this factory, but no stream was provided as an upper bound (e.g. `StreamFactory::make` was never called).');
@@ -63,13 +72,12 @@ class StreamFactory {
 		return $this->make(AsyncPoll::awaitable($incoming));
 	}
 	public function tick(int $period): Stream<int> {
-		$stream = $this->make(async {
+		$stream = $this->bounded_make(async {
 			for($i = 0; ; $i++) {
 				await \HH\Asio\usleep($period);
 				yield $i;
 			}
 		});
-		$stream->end_on($this->get_total_awaitable());
 		return $stream;
 	}
 }

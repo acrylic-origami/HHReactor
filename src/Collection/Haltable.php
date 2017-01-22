@@ -2,37 +2,32 @@
 namespace HHRx\Collection;
 class Haltable<+T> implements Awaitable<?T>, IHaltable {
 	private ConditionWaitHandle<?T> $handle;
-	private Awaitable<Vector<?T>> $vec;
 	public function __construct(private Awaitable<T> $awaitable) {
-		// Two workarounds:
-		// One for ConditionWaitHandle not accepting Awaitable<mixed>
-		$void_awaitable = async {
-			await \HH\Asio\later();
-			await $this->awaitable;
+		$this->handle = ConditionWaitHandle::create(\HH\Asio\later()->getWaitHandle()); // dummy Awaitable if $awaitable is already finished
+		$notifier = async {
+			$v = await $this->awaitable;
+			$handle = $this->handle;
+			if(!$handle->isFinished())
+				// if we weren't beat to the punch by a `halt` call
+				$handle->succeed($v);
 		};
-		// One for no \HH\Asio\va yet
-		$null_awaitable = async {
-			await $void_awaitable;
-			return null;
-		};
-		$this->handle = ConditionWaitHandle::create($void_awaitable->getWaitHandle());
-		$this->vec = \HH\Asio\v(Vector{
-			$null_awaitable,
-			async {
-				return await $this->handle;
-			}, async {
-				$v = await $this->awaitable;
-				if(!$this->handle->isFinished())
-					// else we were beat to the punch by a `halt` call
-					$this->handle->succeed($v);
-				return null; // currently a limitation of \Asio\v, waiting for Asio\va (variadic)
-			}
-		});
+		if(!$awaitable->getWaitHandle()->isFinished()) {
+			$this->handle = ConditionWaitHandle::create($notifier->getWaitHandle());
+		}
 	}
+	private function fn(): void {}
 	public function getWaitHandle(): WaitHandle<?T> {
 		$T_awaitable = async {
-			$T = await $this->vec;
-			return $T[1];
+			try {
+				return await $this->handle;
+			}
+			catch(\Exception $e) {
+				echo 'CAUGHT!';
+				/* HH_IGNORE_ERROR[4105] */
+				debug_print_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+				$this->fn();
+				return null;
+			}
 		};
 		return $T_awaitable->getWaitHandle();
 	}

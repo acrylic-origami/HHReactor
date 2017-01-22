@@ -8,10 +8,16 @@ class Stream<+T> {
 	private Vector<(function(): Awaitable<mixed>)> $end_subscribers = Vector{};
 	public function __construct(private Producer<T> $producer, private StreamFactory $factory) {}
 	public async function run(): Awaitable<void> {
-		foreach($this->producer await as $next) {
-			$v = \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<mixed>) $handler) ==> $handler($next)));
-			await $v; // event subscriptions
-		}
+		// try {
+			foreach($this->producer await as $next) {
+				$v = \HH\Asio\v($this->subscribers->map(((function(T): Awaitable<mixed>) $handler) ==> $handler($next)));
+				await $v; // event subscriptions
+			}
+		// }
+		// catch(\Exception $e) {
+		// 	echo $e->getTraceAsString();
+		// 	// throw $e;
+		// }
 		await \HH\Asio\v($this->end_subscribers->map(((function(): Awaitable<mixed>) $handler) ==> $handler())); // end subscriptions
 	}
 	// public async function get_total_awaitable(): Awaitable<void> {
@@ -22,6 +28,9 @@ class Stream<+T> {
 	}
 	public function subscribe((function(T): Awaitable<mixed>) $incoming): void {
 		$this->subscribers->add($incoming);
+		// return () ==> {
+		// 	$this->subscribers->removeKey()
+		// };
 	}
 	public function onEnd((function(): Awaitable<mixed>) $incoming): void {
 		$this->end_subscribers->add($incoming);
@@ -43,15 +52,18 @@ class Stream<+T> {
 		});
 	}
 	public async function await_end(): Awaitable<void> {
-		$wait_handle = ConditionWaitHandle::create($this->factory->get_total_awaitable()->getWaitHandle()); // assume getWaitHandle doesn't freeze the total_awaitable to the current linked list of subawaitables (which doesn't even make sense to say)
-		$this->onEnd(async () ==> {
-			// this is an end handler of this stream, so this adds to the wait of total_awaitable.
-			// The `later` call ensures that waiting the local $wait_handle below executes before the end handlers do => before total_awaitable.
-			// Note that $wait_handle is local, so this is the only possible resolver.
-			$wait_handle->succeed(null);
-			await \HH\Asio\later();
-		});
-		await $wait_handle;
+		$total_wait_handle = $this->factory->get_total_awaitable()->getWaitHandle();
+		if(!$total_wait_handle->isFinished()) {
+			$wait_handle = ConditionWaitHandle::create($total_wait_handle); // assume getWaitHandle doesn't freeze the total_awaitable to the current linked list of subawaitables (which doesn't even make sense to say)
+			$this->onEnd(async () ==> {
+				// this is an end handler of this stream, so this adds to the wait of total_awaitable.
+				// The `later` call ensures that waiting the local $wait_handle below executes before the end handlers do => before total_awaitable.
+				// Note that $wait_handle is local to this method, so this is the only possible resolver.
+				$wait_handle->succeed(null);
+				await \HH\Asio\later();
+			});
+			await $wait_handle;
+		}
 	}
 	public async function collapse(): Awaitable<\ConstVector<T>> {
 		$accumulator = Vector{};
