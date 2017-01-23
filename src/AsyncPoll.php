@@ -65,10 +65,12 @@ class AsyncPoll {
 			$race_handle->set($total_awaitable->getWaitHandle());
 		}
 		while(!is_null($total_awaitable) && !$total_awaitable->getWaitHandle()->isFinished()) {
-			invariant(!is_null($race_handle), 'Since this is running, there must be at least one pending producer, so $race_handle can\'t have finished yet.');
 			$v = await $race_handle;
 			$race_handle->reset();
+			// reset *must* precede yield
+			
 			yield $v;
+			// Contemplating deleting this `later` call. Does $total_awaitable->isFinished() => $race_handle->isFinished()?
 			await \HH\Asio\later(); // although the `$total_awaitable` completes here, since the `ConditionWaitHandle` isn't `await`ed, the 'not notified by child...' error doesn't propagate...
 		}
 		if(!is_null($race_handle)) { // ...so it must be finished by this point

@@ -31,7 +31,6 @@ class ConditionWaitHandleWrapper<T> implements Awaitable<T> { // extends Wrapper
 		invariant(!is_null($wait_handle), '`_notify` called before assignment of `ConditionWaitHandle` or reset operation has completed.');
 		$f($wait_handle);
 		await \HH\Asio\later(); // ensure that control is released immediately to the handlers subscribed on this ConditionWaitHandle
-		$this->fn();
 	}
 	public function succeed(T $v): Awaitable<void> {
 		return $this->_notify((ConditionWaitHandle<T> $wait_handle) ==> {

@@ -2,19 +2,11 @@
 require_once(__DIR__ . '/../vendor/hh_autoload.php');
 async function f<T>(T $v): AsyncIterator<T> {
 	await HH\Asio\later();
-	// echo 'AWAITED';
-	// var_dump($v);
 	yield $v;
 }
 $factory = new HHRx\StreamFactory();
 $streams = Vector{ $factory->make(f(1)), $factory->make(f(2)) };
 $river = $factory->merge($streams);
-// HH\Asio\join(async {
-// 	f();
-// 	foreach($stream->clone_producer()->get_iterator() await as $v) {
-// 		var_dump($v);
-// 	}
-// });
 $streams->mapWithKey((int $k, HHRx\Stream $stream) ==> {
 	$stream->subscribe(async (int $v) ==> {
 		printf("Stream %d: %d\n", $k, $v);

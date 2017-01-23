@@ -10,7 +10,6 @@ class StreamFactory {
 	public function make<Tk, T>(AsyncIterator<T> $raw_producer): Stream<T> {
 		$stream = new Stream(new Producer($raw_producer), $this);
 		$producer_total_awaitable = $stream->run();
-		var_dump($producer_total_awaitable);
 		$this->total_awaitable->add($producer_total_awaitable);
 		return $stream;
 	}
