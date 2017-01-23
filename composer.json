@@ -7,6 +7,10 @@
 		}
 	},
 	"require": {
+		"hhvm": "~3.16",
 		"fredemmott/hhvm-autoload": "^1.0"
+	},
+	"require-dev": {
+		"phpunit/phpunit": "~3.7"
 	}
 }

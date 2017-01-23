@@ -111,7 +111,7 @@ These are known as "ready wait-handles" &mdash; prior to `await`ing, `HH\Asio\is
 
 However, when multiple non-ready-wait handles resolve before control returns to `join`, it is a more interesting picture. The order that they are processed is [undefined by specification](http://stackoverflow.com/a/41650153/3925507). Since there is a large bulk of the codebase that relies on asynchronous resetting that mustn't be interrupted, enforcing some order becomes paramount.
 
-Awaiting `HH\Asio\later()` defers resolution until at least the next time `HH\Asio\join` is hit. More formally, it spawns an `Awaitable` that has the lowest priority in the default or IO scheduler, depending on which is specified. `HH\Asio\later()` is everywhere in the HHRx codebase: it alone provides the ordering where it is crucial.
+Awaiting `HH\Asio\later()` defers resolution until at least the next time `HH\Asio\join` is hit. More formally, it spawns an `Awaitable` that has the lowest priority in the default or IO scheduler, depending on which is specified. As a result, it is used mostly to return control as quickly as possible to the `join` within `async` methods (e.g. `ConditionWaitHandleWrapper::_notify`, and to transform ready-wait handles to pending handles in `async` blocks (e.g. `AsyncPoll::producer`).
 
 [Tip: read the `TotalAwaitable` documentation first.] The other crucial consequence is that any `Awaitable` that is not added to the `TotalAwaitable` _might not resolve_, even if it depends on the exact same `Awaitable`s as the application `TotalAwaitable`. This is because, if both are queued in the scheduler and the `TotalAwaitable` resolves first, the application exits before this `Awaitable` resolves. This is why some `Awaitable`s are end-safe, and some aren't.
 
