@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx;
+namespace HHReactor;
 class Wrapper<T> {
 	public function __construct(protected T $v) {}
 	public function set(T $v): void {

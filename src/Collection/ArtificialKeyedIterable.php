@@ -1,6 +1,6 @@
 <?hh // strict
-namespace HHRx\Collection;
-use HHRx\Collection\KeyedContainerWrapper as KC;
+namespace HHReactor\Collection;
+use HHReactor\Collection\KeyedContainerWrapper as KC;
 /* HH_IGNORE_ERROR[4120] KeyedIterable would be covariant on Tk if ImmMap (cf. toImmMap) weren't invariant on it because of its getter. */
 abstract class ArtificialKeyedIterable<+Tk, +Tv, +TCollection as KeyedContainer<Tk, Tv>> implements KeyedIterable<Tk, Tv> {
 	abstract public function slice(int $start, int $len): this;

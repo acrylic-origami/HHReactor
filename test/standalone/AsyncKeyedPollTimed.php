@@ -8,7 +8,7 @@ $times = Map{};
 HH\Asio\join(async {
 	$range = range(1, 1000);
 	shuffle($range);
-	$gen = new HHRx\AsyncKeyedPoll((new Vector($range))->map((int $i) ==> waitt($i*100)));
+	$gen = new HHReactor\AsyncKeyedPoll((new Vector($range))->map((int $i) ==> waitt($i*100)));
 	foreach($gen await as $v) {
 		$times->set($v, microtime());
 	}

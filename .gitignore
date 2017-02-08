@@ -9,3 +9,4 @@ composer.phar
 *.sublime-project
 ._*
 .DS_Store
+*/sandbox/*

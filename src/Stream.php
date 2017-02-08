@@ -1,7 +1,7 @@
 <?hh // strict
-namespace HHRx;
-use HHRx\Collection\Producer;
-use HHRx\Collection\EmptyIterable;
+namespace HHReactor;
+use HHReactor\Collection\Producer;
+use HHReactor\Collection\EmptyIterable;
 <<__ConsistentConstruct>>
 class Stream<+T> {
 	private Vector<(function(T): Awaitable<mixed>)> $subscribers = Vector{};

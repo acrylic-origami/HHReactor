@@ -1,7 +1,7 @@
 <?hh // strict
-namespace HHRx;
-use HHRx\Collection\LinkedList;
-use HHRx\Collection\Haltable;
+namespace HHReactor;
+use HHReactor\Collection\LinkedList;
+use HHReactor\Collection\Haltable;
 // type EventHandler = (function((function(): Awaitable<void>)): void);
 class TotalAwaitable implements Awaitable<mixed> {
 	private Vector<Awaitable<mixed>> $subawaitables;
@@ -22,15 +22,15 @@ class TotalAwaitable implements Awaitable<mixed> {
 			await \HH\Asio\v($this->subawaitables);
 		};
 	}
-	public function add(Awaitable<void> $incoming): void {
+	public async function add(Awaitable<void> $incoming): Awaitable<void> {
 		$this->subawaitables->add($incoming);
 		if(!$this->partial->getWaitHandle()->isFinished())
-			$this->partial->soft_halt(); // reset the internal wait handle so that the new element is await-ed immediately
+			await $this->partial->halt(); // reset the internal wait handle so that the new element is await-ed immediately
 	}
-	public function add_stream<Tv>(Stream<Tv> $incoming): void {
-		$this->add($incoming->run());
-	}
-	public function getWaitHandle(): WaitHandle<mixed> {
+	// public function add_stream<Tv>(Stream<Tv> $incoming): void {
+	// 	$this->add($incoming->run());
+	// }
+	public function getWaitHandle(): WaitHandle<void> {
 		return $this->total_awaitable->getWaitHandle();
 	}
 }

@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Collection;
+namespace HHReactor\Collection;
 class AsyncKeyedIteratorWrapper<+Tk, +Tv> implements AsyncKeyedIterator<Tk, Tv> {
 	private ?Awaitable<?(Tk, Tv)> $handle = null;
 	public function __construct(private AsyncKeyedIterator<Tk, Tv> $iterator) {}

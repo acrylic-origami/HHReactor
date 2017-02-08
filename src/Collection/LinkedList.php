@@ -1,6 +1,6 @@
 <?hh // strict
-namespace HHRx\Collection;
-use HHRx\Wrapper;
+namespace HHReactor\Collection;
+use HHReactor\Wrapper;
 class LinkedList<T> { // extends WeakArtificialKeyedIterable<mixed, T>
 	protected Wrapper<?LinkedListNode<T>> $head; // head pointer should always be cloned when list is cloned
 	protected Wrapper<?LinkedListNode<T>> $tail; // tail pointer is wrapped for sharing when cloned

@@ -1,6 +1,6 @@
 <?hh // strict
-namespace HHRx;
-use HHRx\Collection\Producer;
+namespace HHReactor;
+use HHReactor\Collection\Producer;
 class StreamFactory {
 	private Vector<Stream<mixed>> $bounded_streams = Vector{};
 	private TotalAwaitable $total_awaitable;

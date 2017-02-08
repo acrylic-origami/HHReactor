@@ -1,3 +1,3 @@
 <?hh // strict
-namespace HHRx\Collection;
+namespace HHReactor\Collection;
 type ExactKeyedContainerWrapper<+Tk, +Tv> = KeyedContainerWrapper<Tk, Tv, KeyedContainer<Tk, Tv>>;

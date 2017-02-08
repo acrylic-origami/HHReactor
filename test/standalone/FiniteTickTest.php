@@ -12,10 +12,10 @@ async function finite_tickish(): AsyncIterator<int> {
 		yield $i;
 	}
 }
-$factory = new HHRx\StreamFactory();
+$factory = new HHReactor\StreamFactory();
 
 $streams = Vector{ $factory->make(finite_tick(10000)), $factory->make(finite_tick(922337203685))};
 $river = $factory->merge($streams);
-$streams->map((\HHRx\Stream<int> $stream) ==> $stream->subscribe(async (int $v) ==> var_dump($v)));
+$streams->map((\HHReactor\Stream<int> $stream) ==> $stream->subscribe(async (int $v) ==> var_dump($v)));
 $river->subscribe(async (int $v) ==> var_dump($v));
 \HH\Asio\join($factory->get_total_awaitable());

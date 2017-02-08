@@ -1,15 +1,20 @@
 <?hh // strict
-namespace HHRx\Collection;
+namespace HHReactor\Collection;
 class Haltable<+T> implements Awaitable<?T>, IHaltable {
 	private ConditionWaitHandle<?T> $handle;
 	public function __construct(private Awaitable<T> $awaitable) {
 		$this->handle = ConditionWaitHandle::create(\HH\Asio\later()->getWaitHandle()); // dummy Awaitable if $awaitable is already finished
 		$notifier = async {
-			$v = await $this->awaitable;
-			$handle = $this->handle;
-			if(!$handle->isFinished())
-				// if we weren't beat to the punch by a `halt` call
-				$handle->succeed($v);
+			try {
+				$v = await $this->awaitable;
+				$handle = $this->handle;
+				if(!$handle->isFinished())
+					// if we weren't beat to the punch by a `halt` call
+					$handle->succeed($v);
+			}
+			catch(\Exception $e) {
+				$this->handle->fail($e);
+			}
 		};
 		if(!$awaitable->getWaitHandle()->isFinished()) {
 			$this->handle = ConditionWaitHandle::create($notifier->getWaitHandle());
@@ -18,16 +23,17 @@ class Haltable<+T> implements Awaitable<?T>, IHaltable {
 	private function fn(): void {}
 	public function getWaitHandle(): WaitHandle<?T> {
 		$T_awaitable = async {
-			try {
+			// try {
 				return await $this->handle;
-			}
-			catch(\Exception $e) {
-				echo 'CAUGHT!';
-				/* HH_IGNORE_ERROR[4105] */
-				debug_print_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
-				$this->fn();
-				return null;
-			}
+			// }
+			// catch(\Exception $e) {
+			// 	echo 'CAUGHT!';
+			// 	// /* HH_IGNORE_ERROR[4105] */
+			// 	// debug_print_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
+			// 	var_dump($e);
+			// 	throw $e;
+			// 	// return null;
+			// }
 		};
 		return $T_awaitable->getWaitHandle();
 	}

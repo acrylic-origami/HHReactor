@@ -1,0 +1,12 @@
+<phpunit bootstrap="vendor/hh_autoload.php">
+	<testsuites>
+		<testsuite name="classwise">
+			<directory>test/Classwise</directory>
+			<exclude>test/Classwise/Asio/._ResettableConditionWaitHandleTest.php</exclude>
+		</testsuite>
+		<testsuite name="behavior">
+			<directory>test/Behavior</directory>
+			<exclude>test/Behavior/._*</exclude>
+		</testsuite>
+	</testsuites>
+</phpunit>

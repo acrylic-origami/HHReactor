@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Collection;
+namespace HHReactor\Collection;
 // Iterable<Pair<Tk, Tv>> -> KeyedIterable<Tk, Tv>
 class PairwiseKeyedContainerWrapper<+Tk, +Tv> { // WeakArtificialKeyedIterable<Tk, Tv>
 	public function __construct(private Iterable<Pair<Tk, Tv>> $pairs) {}

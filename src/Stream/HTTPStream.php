@@ -1,9 +1,9 @@
 <?hh // strict
-namespace HHRx\Stream;
-use HHRx\Stream;
-use HHRx\StreamFactory;
-use HHRx\KeyedStream;
-use HHRx\Streamlined;
+namespace HHReactor\Stream;
+use HHReactor\Stream;
+use HHReactor\StreamFactory;
+use HHReactor\KeyedStream;
+use HHReactor\Streamlined;
 
 class HTTPStream implements Streamlined<string> {
 	private Stream<string> $local_stream;

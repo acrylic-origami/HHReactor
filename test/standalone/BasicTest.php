@@ -4,10 +4,10 @@ async function f<T>(T $v): AsyncIterator<T> {
 	await HH\Asio\later();
 	yield $v;
 }
-$factory = new HHRx\StreamFactory();
+$factory = new HHReactor\StreamFactory();
 $streams = Vector{ $factory->make(f(1)), $factory->make(f(2)) };
 $river = $factory->merge($streams);
-$streams->mapWithKey((int $k, HHRx\Stream $stream) ==> {
+$streams->mapWithKey((int $k, HHReactor\Stream $stream) ==> {
 	$stream->subscribe(async (int $v) ==> {
 		printf("Stream %d: %d\n", $k, $v);
 	});

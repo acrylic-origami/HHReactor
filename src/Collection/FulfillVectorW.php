@@ -1,6 +1,6 @@
 <?hh // strict
-namespace HHRx\Collection;
-use HHRx\Collection\KeyedContainerWrapper as KC;
+namespace HHReactor\Collection;
+use HHReactor\Collection\KeyedContainerWrapper as KC;
 trait FulfillVectorW<Tv> {
 	require extends KC<int, Tv, Vector<Tv>>;
 	public function __construct(?Vector<Tv> $units = null) {

@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Collection;
+namespace HHReactor\Collection;
 class AsyncIteratorWrapper<+T> implements AsyncIterator<T>, IHaltable {
 	private ?Haltable<?(mixed, T)> $handle = null;
 	public function __construct(private AsyncIterator<T> $iterator) {} // Note: cold behaviour

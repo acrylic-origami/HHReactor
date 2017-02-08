@@ -1,10 +1,10 @@
 <?hh // strict
-namespace HHRx;
-use HHRx\Collection\Producer;
-use HHRx\Asio\ConditionWaitHandleWrapper;
+namespace HHReactor;
+use HHReactor\Collection\Producer;
+use HHReactor\Asio\ResettableConditionWaitHandle;
 class AsyncPoll {
 	public static async function awaitable<T>(Iterable<Awaitable<T>> $subawaitables): AsyncIterator<T> {
-		$race_handle = new ConditionWaitHandleWrapper(); // ?Wrapper<ConditionWaitHandle>
+		$race_handle = new ResettableConditionWaitHandle(); // ?Wrapper<ConditionWaitHandle>
 		$pending_subawaitables = 
 			$subawaitables->filter((Awaitable<T> $v) ==> !$v->getWaitHandle()->isFinished())
 			              ->map(async (Awaitable<T> $v) ==> {
@@ -21,67 +21,24 @@ class AsyncPoll {
 				await \HH\Asio\v($pending_subawaitables);
 			};
 			$race_handle->set($total_awaitable->getWaitHandle());
-			while(!$total_awaitable->getWaitHandle()->isFinished()) {
-				$v = await $race_handle;
-				$race_handle->reset();
-				yield $v;
-				await \HH\Asio\later();
+			while(true) {
+				try {
+					$v = await $race_handle;
+					$race_handle->reset();
+					yield $v;
+				}
+				catch(\InvalidArgumentException $e) {
+					if(!$total_awaitable->getWaitHandle()->isFinished() || $total_awaitable->getWaitHandle()->isFailed())
+						// Did one of the producers fail, or was the race handle `fail`ed explicitly? If so, rethrow
+						throw $e;
+					else
+						// else, we assume the exception occurs simply because of the logic of the last arc of iteration
+						break;
+				}
 			}
-			try {
-				$race_handle->getWaitHandle()->result();
-				// See similar clause in self::producer() for explanation
-			}
-			catch(\InvalidArgumentException $e) {}
 		}
 		else
 			foreach($subawaitables as $v)
 				yield $v->getWaitHandle()->result();
-	}
-	public static async function producer<T>(Iterable<Producer<T>> $producers): AsyncIterator<T> {
-		$race_handle = new ConditionWaitHandleWrapper();
-		$pending_producers = Vector{};
-		$total_awaitable = null;
-		foreach($producers as $producer) {
-			foreach($producer->fast_forward() as $v)
-				yield $v; // this is not a trivial procedure: what if this Iterator is instantiated outside of a `HH\Asio\join`, `next`ed, then control is handed back to the join? 
-			// if(!$producer->isFinished()) {}
-			// [OBSOLETE] // vital that they aren't finished, so that these notifiers won't try to notify the race_handle before we get a chance to `set` it just afterwards
-			
-			$pending_producers->add(async {
-				await \HH\Asio\later(); // even if this producer is totally resolved, defer until we reach the top join again. This is so that race handle can be guaranteed to be primed.
-				try {
-					// foreach($producer await as $v) {
-					foreach($producer await as $next) {
-						await $race_handle->succeed($next);
-					}
-				}
-				catch(\Exception $e) {
-					await $race_handle->fail($e);
-				}
-			});
-			$total_awaitable = async {
-				await \HH\Asio\v($pending_producers);
-			};
-			$race_handle->set($total_awaitable->getWaitHandle());
-		}
-		while(!is_null($total_awaitable) && !$total_awaitable->getWaitHandle()->isFinished()) {
-			$v = await $race_handle;
-			$race_handle->reset();
-			// reset *must* precede yield
-			
-			yield $v;
-			// Contemplating deleting this `later` call. Does $total_awaitable->isFinished() => $race_handle->isFinished()?
-			await \HH\Asio\later(); // although the `$total_awaitable` completes here, since the `ConditionWaitHandle` isn't `await`ed, the 'not notified by child...' error doesn't propagate...
-		}
-		if(!is_null($race_handle)) { // ...so it must be finished by this point
-			// screen for exceptions aside outside of the expected one from the final element ('ConditionWaitHandle not notified by its child')
-			try {
-				$race_handle->getWaitHandle()->result();
-			}
-			catch(\InvalidArgumentException $e) {
-				// The last element necessarily triggers this exception during this `later` await, because this `later` pushes this scope behind the last producer's `later` (from the corresponding `_notify` call) in the scheduler, expiring `total_awaitable` and raising `InvalidArgument Exception`. 
-				// We purposefully ignore this Exception, because there's no practical way to avoid resetting it on the final arc of the iteration.
-			}
-		}
 	}
 }

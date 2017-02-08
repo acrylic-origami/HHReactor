@@ -1,6 +1,6 @@
 <?hh // strict
-namespace HHRx\Collection;
-use HHRx\Collection\KeyedContainerWrapper as KC;
+namespace HHReactor\Collection;
+use HHReactor\Collection\KeyedContainerWrapper as KC;
 trait FulfillMapW<Tk, Tv> {
 	require extends KC<Tk, Tv, Map<Tk, Tv>>;
 	public function __construct(?Map<Tk, Tv> $units = null) {

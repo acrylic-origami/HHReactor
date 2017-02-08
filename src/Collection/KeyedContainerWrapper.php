@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Collection;
+namespace HHReactor\Collection;
 <<__ConsistentConstruct>>
 abstract class KeyedContainerWrapper<+Tk, +Tv, +TCollection as \KeyedContainer<Tk, Tv>> extends ArtificialKeyedIterable<Tk, Tv, TCollection> {
 	public function __construct(private ?TCollection $units = null) {}

@@ -1,5 +1,5 @@
 <?hh // strict
-namespace HHRx\Collection;
+namespace HHReactor\Collection;
 <<__ConsistentConstruct>>
 class LinkedListNode<T> {
 	public function __construct(

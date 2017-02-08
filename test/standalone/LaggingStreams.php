@@ -4,7 +4,7 @@ async function wait_produce(int $i): AsyncKeyedIterator<int, int> {
 	await HH\Asio\usleep(10000); // non-blocking 10ms
 	yield $i => $i;
 }
-function subscribe<Tu>(HHRx\Stream<Tu> $stream, string $prefix = ''): void {
+function subscribe<Tu>(HHReactor\Stream<Tu> $stream, string $prefix = ''): void {
 	$stream->subscribe(async (Tu $v) ==> {
 		usleep(100000); // intentionally BLOCKING 100ms
 		                // represents a long unit of work
@@ -12,7 +12,7 @@ function subscribe<Tu>(HHRx\Stream<Tu> $stream, string $prefix = ''): void {
 		var_dump($v);
 	});
 }
-$factory = new HHRx\StreamFactory();
+$factory = new HHReactor\StreamFactory();
 $producers = (new Vector(range(1, 3)))->map((int $v) ==> $factory->make(wait_produce($v)));
 $merged = $factory->merge($producers)->map((int $v) ==> 'MERGED '.$v );
 $double_merged = $factory->merge((Vector{ $merged })->concat($producers))->map((arraykey $v) ==> 'DOUBLE-'.$v );

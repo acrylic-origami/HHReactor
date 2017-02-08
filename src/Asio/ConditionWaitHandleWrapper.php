@@ -1,28 +1,15 @@
 <?hh // strict
-namespace HHRx\Asio;
-class ConditionWaitHandleWrapper<T> implements Awaitable<T> { // extends Wrapper<ConditionWaitHandle<T>>
-	private ?ConditionWaitHandle<T> $wait_handle = null;
-	public function __construct(private ?WaitHandle<void> $total_wait_handle = null) {
-		$total_wait_handle = $this->total_wait_handle;
-		if(!is_null($total_wait_handle))
-			$this->wait_handle = ConditionWaitHandle::create($total_wait_handle);
-	}
-	public function set(WaitHandle<void> $total_wait_handle): void {
-		$this->total_wait_handle = $total_wait_handle;
-		$this->wait_handle = ConditionWaitHandle::create($total_wait_handle);
-	}
-	public function reset(): void {
-		$total_wait_handle = $this->total_wait_handle;
-		if(!is_null($total_wait_handle))
-			$this->wait_handle = ConditionWaitHandle::create($total_wait_handle);
-	}
-	private function fn(): void {}
+namespace HHReactor\Asio;
+abstract class ConditionWaitHandleWrapper<T> implements Awaitable<T> { // extends Wrapper<ConditionWaitHandle<T>>
+	protected ?ConditionWaitHandle<T> $wait_handle = null;
+	abstract public function reset(): void;
 	private async function _notify((function(ConditionWaitHandle<T>): void) $f): Awaitable<void> {
 		while(true) {
 			$wait_handle = $this->wait_handle;
 			$total_wait_handle = $this->total_wait_handle;
-			invariant(!is_null($wait_handle), '');
-			invariant(!is_null($total_wait_handle), '`total_wait_handle` cannot be null if `$wait_handle` is not null by construction.');
+			invariant(!is_null($total_wait_handle), 'Tried to notify ConditionWaitHandleWrapper before setting it.');
+			invariant(!is_null($wait_handle), '`wait_handle` cannot be null if `$total_wait_handle` is not null by construction.');
+			// if($total_wait_handle->isFinished() && !$total_wait_handle->isFailed()) return; // ?
 			if(!$wait_handle->isFinished() || $total_wait_handle->isFinished())
 				break;
 			await \HH\Asio\later(); // for resetting operations: it's possible for two `succeed` to be queued before the reset is executed, so keep pushing this back until we have an unfinished handle to notify

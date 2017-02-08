@@ -1,9 +1,9 @@
 <?hh // strict
-namespace HHRx\Stream;
-use HHRx\Stream;
-use HHRx\StreamFactory;
-use HHRx\Streamlined;
-use HHRx\KeyedStream;
+namespace HHReactor\Stream;
+use HHReactor\Stream;
+use HHReactor\StreamFactory;
+use HHReactor\Streamlined;
+use HHReactor\KeyedStream;
 class ReadFileStream implements Streamlined<string> {
 	private Stream<string> $local_stream;
 	public function __construct(StreamFactory $stream_factory, string $f, bool $write_en = false, float $timeout = 0.0) {
