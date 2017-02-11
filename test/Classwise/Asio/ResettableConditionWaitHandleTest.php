@@ -8,7 +8,8 @@ class ResettableConditionWaitHandleTest extends TestCase {
 		return $incoming;
 	}
 	private function make_empty_wrapper<T>(): ResettableConditionWaitHandle<T> {
-		return new ResettableConditionWaitHandle(\HH\Asio\later()->getWaitHandle());
+		$later = \HH\Asio\later();
+		return new ResettableConditionWaitHandle(() ==> $later);
 	}
 	private function make_empty_handle<T>(): ConditionWaitHandle<T> {
 		return ConditionWaitHandle::create(\HH\Asio\later()->getWaitHandle());
@@ -34,7 +35,7 @@ class ResettableConditionWaitHandleTest extends TestCase {
 			await \HH\Asio\later(); // first notify
 			await \HH\Asio\later(); // second notify
 		};
-		$wait_handle = new ResettableConditionWaitHandle($awaitable->getWaitHandle());
+		$wait_handle = new ResettableConditionWaitHandle(() ==> $awaitable);
 		$vec = \HH\Asio\join(\HH\Asio\v(Vector {
 			async {
 				await $wait_handle->succeed(42);
@@ -45,7 +46,6 @@ class ResettableConditionWaitHandleTest extends TestCase {
 				$V = Vector{};
 				$next = await $wait_handle;
 				$V->add($next);
-				$wait_handle->reset();
 				await \HH\Asio\later();
 				$next = await $wait_handle;
 				$V->add($next);
@@ -59,7 +59,7 @@ class ResettableConditionWaitHandleTest extends TestCase {
 			await \HH\Asio\later(); // first notify
 			await \HH\Asio\later(); // second notify
 		};
-		$wait_handle = new ResettableConditionWaitHandle($awaitable->getWaitHandle());
+		$wait_handle = new ResettableConditionWaitHandle(() ==> $awaitable);
 		$vec = \HH\Asio\join(\HH\Asio\v(Vector {
 			async {
 				await $wait_handle->succeed(42);
@@ -73,7 +73,6 @@ class ResettableConditionWaitHandleTest extends TestCase {
 				await \HH\Asio\later(); // note: the reset is deferred and trying to hand control back to the second `succeed`. We should be able to do this as many times as we want:
 				await \HH\Asio\later();
 				await \HH\Asio\later();
-				$wait_handle->reset();
 				$next = await $wait_handle;
 				$V->add($next);
 				return $V;

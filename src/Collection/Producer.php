@@ -98,8 +98,8 @@ class Producer<+T> implements AsyncIterator<T> {
 			}
 		};
 		$total_awaitable = new TotalAwaitable(Vector{ $emitter });
-		$race_handle->set($total_awaitable->getWaitHandle());
-		return new static(static::_listen_produce($race_handle));
+		$race_handle->set(() ==> $total_awaitable);
+		return new static(static::_listen_produce($race_handle, $total_awaitable));
 	}
 	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): AsyncIterator<this> {
 		$handles = Map{};
@@ -113,7 +113,7 @@ class Producer<+T> implements AsyncIterator<T> {
 					$handle = new ResettableConditionWaitHandle($total_wait_handle);
 					// $total_awaitable->add($iterator);
 					$handles[$key] = $handle;
-					yield new static(static::_listen_produce($handle));
+					yield new static(static::_listen_produce($handle, $total_wait_handle));
 				}
 				await $handles[$key]->succeed($v);
 			}
@@ -130,33 +130,35 @@ class Producer<+T> implements AsyncIterator<T> {
 				yield new Vector($clone->fast_forward());
 		});
 	}
-	public function debounce(int $usecs): this {
-		$wait_handle = null;
-		foreach(clone $this await as $v) {
-			if(!is_null($wait_handle) && !$wait_handle->isFinished()))
-				await $wait_handle->fail();
-			$wait_handle = new InterruptableWaitHandle(async {
-				await \HH\Asio\sleep($usecs);
-				return $v;
-			});
-		}
-	}
+	
+	// Hmm, tricky. Defer.
+	// public function debounce(int $usecs): this {
+	// 	$wait_handle = new ResettableConditionWaitHandle(async () ==> {
+	// 		await \HH\Asio\usleep($usecs);
+	// 		return $v;
+	// 	});
+	// 	foreach(clone $this await as $v) {
+	// 		if(!is_null($wait_handle) && !$wait_handle->isFinished())
+	// 			await $wait_handle->fail(new \HHReactor\ResetException());
+	// 	}
+	// }
+	
 	public function window(Producer<mixed> $signal): Producer<this> {
 		$handle = new Wrapper(new ResettableConditionWaitHandle());
 		$value_emitter = async {
 			$cloned = clone $this; // crucial this happens before later() because we must wait for `$signal` to tick once before later() resolves
-			await \HH\Asio\later();
+			await \HH\Asio\later(); // wait for handle to be guaranteed-set
 			foreach($cloned await as $v) {
 				await $handle->get()->succeed($v);
 			}
 		};
 		$producer_emitter = async {
 			foreach(clone $signal await as $_) {
-				$handle->set(new ResettableConditionWaitHandle($value_emitter->getWaitHandle()));
-				yield new static(static::_listen_produce($handle->get()));
+				$handle->set(new ResettableConditionWaitHandle(() ==> $value_emitter));
+				yield new static(static::_listen_produce($handle->get(), $value_emitter));
 			}
 		};
-		$handle->get()->set($value_emitter->getWaitHandle());
+		$handle->get()->set(() ==> $value_emitter);
 		return new static($producer_emitter);
 	}
 	
@@ -236,8 +238,8 @@ class Producer<+T> implements AsyncIterator<T> {
 			$total_awaitable = async {
 				await \HH\Asio\v($pending_subawaitables);
 			};
-			$race_handle->set($total_awaitable->getWaitHandle());
-			return self::_listen_produce($race_handle);
+			$race_handle->set(() ==> $total_awaitable->getWaitHandle());
+			return self::_listen_produce($race_handle, $total_awaitable);
 		}
 		else {
 			return async {
@@ -282,23 +284,22 @@ class Producer<+T> implements AsyncIterator<T> {
 			$total_awaitable = async {
 				await \HH\Asio\v($pending_producers);
 			};
-			$race_handle->set($total_awaitable->getWaitHandle());
+			$race_handle->set(() ==> $total_awaitable->getWaitHandle());
 		}
 		if(!is_null($total_awaitable))
-			foreach(static::_listen_produce($race_handle) await as $v)
+			foreach(static::_listen_produce($race_handle, $total_awaitable) await as $v)
 				yield $v;
 	}
-	protected static async function _listen_produce<Tv>(ResettableConditionWaitHandle<Tv> $race_handle): AsyncIterator<Tv> {
+	protected static async function _listen_produce<Tv>(ResettableConditionWaitHandle<Tv> $race_handle, Awaitable<mixed> $total_awaitable): AsyncIterator<Tv> {
 		while(true) {
 			try {
 				$v = await $race_handle;
-				$race_handle->reset();
 				// reset *must* precede yield
 				
 				yield $v;
 			}
 			catch(\InvalidArgumentException $e) {
-				$total_wait_handle = $race_handle->get_total_wait_handle();
+				$total_wait_handle = $total_awaitable->getWaitHandle();
 				invariant(!is_null($total_wait_handle), 'Race handle must not be based on ready-wait handle to emit-produce.'); // this might be impossible to reach
 				if(!$total_wait_handle->isFinished() || $total_wait_handle->isFailed())
 					// Did one of the producers fail, or was the race handle `fail`ed explicitly? If so, rethrow

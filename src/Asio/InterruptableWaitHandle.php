@@ -1,28 +1,30 @@
 <?hh // strict
 namespace HHReactor\Asio;
 class InterruptableWaitHandle<T> implements Awaitable<T> {
-	private ResettableConditionWaitHandle<T> $handle;
+	private ConditionWaitHandle<T> $handle;
 	public function __construct(Awaitable<T> $awaitable) {
-		$this->handle = new ResettableConditionWaitHandle(\HH\Asio\later()->getWaitHandle()); // dummy Awaitable if $awaitable is already finished
+		$this->handle = ConditionWaitHandle::create(\HH\Asio\later()->getWaitHandle()); // dummy Awaitable if $awaitable is already finished
 		$notifier = async {
 			$v = await $awaitable;
 			$handle = $this->handle;
 			if(!$handle->getWaitHandle()->isFinished())
 				// if we weren't beat to the punch by a notification
-				await $handle->succeed($v);
+				$handle->succeed($v);
 		};
 		if(!$awaitable->getWaitHandle()->isFinished()) {
-			$this->handle = new ResettableConditionWaitHandle($notifier->getWaitHandle());
+			$this->handle = ConditionWaitHandle::create($notifier->getWaitHandle());
 		}
 	}
 	public function getWaitHandle(): WaitHandle<T> {
 		return $this->handle->getWaitHandle();
 	}
 	public async function succeed(T $v): Awaitable<void> {
-		await $this->handle->succeed($v);
+		$this->handle->succeed($v);
+		await \HH\Asio\later();
 	}
 	public async function fail(\Exception $e): Awaitable<void> {
-		await $this->handle->fail($e);
+		$this->handle->fail($e);
+		await \HH\Asio\later();
 	}
 	public function isFinished(): void {
 		$this->handle->getWaitHandle()->isFinished();
