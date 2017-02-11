@@ -77,7 +77,7 @@ class Producer<+T> implements AsyncIterator<T> {
 	public function reduce<Tv super T>((function(T, T): Tv) $f): Awaitable<?Tv> {
 		return $this->scan($f)->last();
 	}
-	private function flat_map<Tv>((function(T): Producer<Tv>) $f): AsyncIterator<Tv> {
+	private function flat_map<Tv>((function(T): Producer<Tv>) $f): Producer<Tv> {
 		// this would kill it as an anonymous class, but alas not yet
 		$race_handle = new ResettableConditionWaitHandle();
 		$cloned = clone $this;
@@ -101,7 +101,7 @@ class Producer<+T> implements AsyncIterator<T> {
 		$race_handle->set(() ==> $total_awaitable);
 		return new static(static::_listen_produce($race_handle, $total_awaitable));
 	}
-	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): AsyncIterator<this> {
+	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
 		$handles = Map{};
 		$total_wait_handle = null;
 		$total_iterator = async {
@@ -121,7 +121,7 @@ class Producer<+T> implements AsyncIterator<T> {
 		$total_wait_handle = async {
 			foreach($total_iterator await as $_) {}
 		};
-		return $total_iterator;
+		return new static($total_iterator);
 	}
 	public function buffer(Producer<mixed> $signal): Producer<\ConstVector<T>> {
 		return new self(async {
