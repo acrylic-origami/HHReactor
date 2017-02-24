@@ -6,7 +6,7 @@ class ResettableConditionWaitHandle<T> implements Awaitable<T> { // extends Wrap
 		if(!is_null($lifetime_factory))
 			$this->wait_handle = ConditionWaitHandle::create(\HHReactor\Asio\voidify($lifetime_factory()));
 	}
-	public function set(private (function(): Awaitable<mixed>) $lifetime_factory): void {
+	public function set((function(): Awaitable<mixed>) $lifetime_factory): void {
 		$this->lifetime_factory = $lifetime_factory;
 		$this->wait_handle = ConditionWaitHandle::create(\HHReactor\Asio\voidify($lifetime_factory()));
 	}

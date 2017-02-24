@@ -1,9 +1,11 @@
 <?hh // strict
 namespace HHReactor\Collection;
-class AsyncIteratorWrapper<+T> implements AsyncIterator<T>, IHaltable {
+use HHReactor\Asio\Haltable;
+use HHReactor\Asio\HaltResult;
+class AsyncIteratorWrapper<+T> implements AsyncIterator<HaltResult<T>>, IHaltable {
 	private ?Haltable<?(mixed, T)> $handle = null;
 	public function __construct(private AsyncIterator<T> $iterator) {} // Note: cold behaviour
-	public function next(): Awaitable<?(mixed, T)> {
+	public async function next(): Awaitable<?(mixed, HaltResult<T>)> {
 		$handle = $this->handle;
 		if(is_null($handle) || $handle->getWaitHandle()->isFinished()) {
 			// refresh the handle if this is the first `next` call or the underlying awaitable has resolved
@@ -15,14 +17,14 @@ class AsyncIteratorWrapper<+T> implements AsyncIterator<T>, IHaltable {
 					throw $e;
 				else
 					// for AsyncGenerators, continue issuing iterator termination signal
-					return async { return null; };
+					return null;
 			}
-			$this->handle = new Haltable($pending_next);
-			return $this->handle;
+			$handle = new Haltable($pending_next);
+			$this->handle = $handle;
 		}
-		else
-			// the handle is still pending -- return it
-			return $handle;
+		$next = await $handle;
+		$result = $next['result'] ?? tuple(null, null);
+		return tuple($result[0], shape('_halted' => $next['_halted'], 'result' => $result[1]));
 	}
 	public async function halt(?\Exception $e = null): Awaitable<void> {
 		$handle = $this->handle;

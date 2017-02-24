@@ -139,9 +139,9 @@ An HHVM-specific wrinkle is that `AsyncGenerator`, which comes from `async` meth
 
 #### Collection\Producer<T>
 
-`Producer` as a separate, fully-fledged class arose out of the backpressure problem. When multiple `Producers` are bound to a single `AsyncIterator[Wrapper]`, each maintains a list &mdash; a `LinkedList` to be precise &mdash; of the values that have been added since the last that that `Producer` emitted values.
+`Producer` as a separate, fully-fledged class arose out of the backpressure problem. When multiple `Producers` are bound to a single `AsyncIterator[Wrapper]`, each maintains a queue of the values that have been added since the last that that `Producer` emitted values.
 
-To avoid a memory leak present in the naive implementaion (e.g. implementing the lagging list with a `Vector`), the HHRx `LinkedList` implementation marches its head to shed references to lagged nodes that have already been emitted. See `LinkedList::shift`.
+To avoid a memory leak present in the naive implementation (e.g. implementing the lagging list with a `Vector`), the HHRx `Queue` implementation marches its head to shed references to lagged nodes that have already been emitted. See `Queue::shift`.
 
 #### Collection\Haltable<T> & Collection\IHaltable<T>
 

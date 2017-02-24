@@ -1,33 +1,32 @@
 <?hh // strict
 namespace HHReactor\Collection;
 use HHReactor\Wrapper;
-class LinkedList<T> { // extends WeakArtificialKeyedIterable<mixed, T>
+class Queue<T> { // extends WeakArtificialKeyedIterable<mixed, T>
 	protected Wrapper<?LinkedListNode<T>> $head; // head pointer should always be cloned when list is cloned
 	protected Wrapper<?LinkedListNode<T>> $tail; // tail pointer is wrapped for sharing when cloned
 	private bool $_empty = false; // initially false for starting condition
 	private bool $_started = false;
 	public function __construct(Iterable<T> $list = Vector{}) {
-		$this->tail = new Wrapper(null);
-		$this->head = new Wrapper($this->_build_list($list->getIterator()));
+		$head = null;
+		$prev = null;
+		$iterator = $list->getIterator();
+		while($iterator->valid()) {
+			$next = new LinkedListNode(null, $iterator->current());
+			if(is_null($head)) {
+				$head = $next;
+				$prev = $head;
+			}
+			invariant(!is_null($prev), 'Can\'t be null here: set on first iteration and never unset.');
+			$prev->set_next($next);
+			$prev = $next;
+		}
+		
+		$this->tail = new Wrapper($prev);
+		$this->head = new Wrapper($head);
 	}
 	public function __clone(): void {
 		if(!is_null($this->head->get()))
 			$this->head = clone $this->head;
-	}
-	private function _build_list(Iterator<T> $iterator): ?LinkedListNode<T> {
-		if($iterator->valid()) {
-			$val = $iterator->current();
-			$iterator->next();
-			$next = $this->_build_list($iterator);
-			if(is_null($next)) {
-				$this->tail->set(new LinkedListNode(null, $val));
-				return $this->tail->get();
-			}
-			return new LinkedListNode($next, $val);
-		}
-		else {
-			return null;
-		}
 	}
 	public function is_empty(): bool {
 		$head = $this->head->get();

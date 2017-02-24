@@ -1,18 +1,23 @@
 <?hh // strict
 namespace HHReactor\Collection;
-use HHReactor\Asio\ResettableConditionWaitHandle;
+use HHReactor\Asio\{
+	ResettableConditionWaitHandle,
+	Haltable,
+	Extendable,
+	ExtendableLifetime,
+	HaltResult
+};
 use HHReactor\Wrapper;
-use HHReactor\TotalAwaitable;
 <<__ConsistentConstruct>>
 // MUST CLONE TO SEPARATE POINTERS
 class Producer<+T> implements AsyncIterator<T> {
-	private LinkedList<?(mixed, T)> $lag;
+	private Queue<?(mixed, T)> $lag;
 	private AsyncIteratorWrapper<T> $iterator;
-	private ?Haltable<?(mixed, T)> $haltable = null;
+	private ?Haltable<?(mixed, HaltResult<T>)> $haltable = null;
 	private bool $finished = false;
 	public function __construct(AsyncIterator<T> $raw_iterator) {
 		$this->iterator = new AsyncIteratorWrapper($raw_iterator);
-		$this->lag = new LinkedList();
+		$this->lag = new Queue();
 	}
 	public function __clone(): void {
 		$this->lag = clone $this->lag;
@@ -22,9 +27,15 @@ class Producer<+T> implements AsyncIterator<T> {
 			// we're on the cutting edge, await next
 			$next = $this->iterator->next();
 			$this->haltable = new Haltable($next);
-			$ret = await $this->haltable;
+			$ret = await $this->haltable; // may have halted, but only locally
 			if($this->lag->is_empty()) {
-				$this->lag->add($ret); // broadcast to other producers (including this one)
+				$next_result = $ret['result'];
+				if(is_null($next_result))
+					return null; // whether or not halted, $next_result null signals end of iteration
+				elseif(!$next_result[1]['_halted']) { // the more global, underlying AsyncIterator may have halted
+					/* HH_IGNORE_ERROR[4110] Because it's not halted, it's either null because our `T` is nullable, or it is not null. */
+					$this->lag->add(tuple($next_result[0], $next_result[1]['result'])); // broadcast to other producers (including this one)
+				}
 			}
 			// var_dump($this->iterator);
 			// var_dump($ret);
@@ -47,6 +58,15 @@ class Producer<+T> implements AsyncIterator<T> {
 			if(!is_null($next))
 				yield $next[1];
 		}
+	}
+	public async function get_lifetime(): Awaitable<void> {
+		foreach(clone $this await as $_) {}
+	}
+	public async function collapse(): Awaitable<\ConstVector<T>> {
+		$accumulator = Vector{};
+		foreach(clone $this await as $v)
+			$accumulator->add($v);
+		return $accumulator;
 	}
 	
 	// ReactiveX-ish operators
@@ -74,34 +94,53 @@ class Producer<+T> implements AsyncIterator<T> {
 		foreach(clone $this await as $v) {}
 		return $v;
 	}
+	public async function first(): Awaitable<?T> {
+		foreach(clone $this await as $v) {
+			return $v;
+		}
+		return null;
+	}
 	public function reduce<Tv super T>((function(T, T): Tv) $f): Awaitable<?Tv> {
 		return $this->scan($f)->last();
 	}
-	private function flat_map<Tv>((function(T): Producer<Tv>) $f): AsyncIterator<Tv> {
-		// this would kill it as an anonymous class, but alas not yet
-		$race_handle = new ResettableConditionWaitHandle();
-		$cloned = clone $this;
-		$total_awaitable = null;
-		$emitter = async {
-			await \HH\Asio\later(); // guarantee that the race handle is set
-			$pending_producers = new TotalAwaitable(Vector{ $cloned->next() });
-			foreach($cloned await as $core_v) {
-				$producer = clone $f($core_v); // should i clone defensively?
-				foreach($producer->fast_forward() as $v) {
-					await $race_handle->succeed($v); // note: if another element is resolved while dealing with this ready-waited result, then it could very well take precedence: this is not guaranteed to resolve consecutively.
+	private function flat_map<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
+		$subject = new Subject(Vector{
+			async (Subject<Tv> $subject) ==> {
+				foreach(clone $this await as $seed) {
+					$subject->attach(async (Subject<Tv> $subject) ==> {
+						foreach(clone $meta($seed) await as $v)
+							$subject->emit($v);
+					});
 				}
-				invariant(!is_null($total_awaitable), 'Can\'t be null because it\'s set right after this async block');
-				await $total_awaitable->add(async {
-					foreach($producer await as $v)
-						await $race_handle->succeed($v);
-				});
 			}
-		};
-		$total_awaitable = new TotalAwaitable(Vector{ $emitter });
-		$race_handle->set(() ==> $total_awaitable);
-		return new static(static::_listen_produce($race_handle, $total_awaitable));
+		});
+		return new static($subject);
 	}
-	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): AsyncIterator<this> {
+	// private function flat_map<Tv>((function(T): Producer<Tv>) $f): Producer<Tv> {
+	// 	// this would kill it as an anonymous class, but alas not yet
+	// 	$race_handle = new ResettableConditionWaitHandle();
+	// 	$cloned = clone $this;
+	// 	$total_awaitable = null;
+	// 	$emitter = async {
+	// 		await \HH\Asio\later(); // guarantee that the race handle is set
+	// 		$pending_producers = new TotalAwaitable(Vector{ $cloned->next() });
+	// 		foreach($cloned await as $core_v) {
+	// 			$producer = clone $f($core_v); // should i clone defensively?
+	// 			foreach($producer->fast_forward() as $v) {
+	// 				await $race_handle->succeed($v); // note: if another element is resolved while dealing with this ready-waited result, then it could very well take precedence: this is not guaranteed to resolve consecutively.
+	// 			}
+	// 			invariant(!is_null($total_awaitable), 'Can\'t be null because it\'s set right after this async block');
+	// 			await $total_awaitable->add(async {
+	// 				foreach($producer await as $v)
+	// 					await $race_handle->succeed($v);
+	// 			});
+	// 		}
+	// 	};
+	// 	$total_awaitable = new TotalAwaitable(Vector{ $emitter });
+	// 	$race_handle->set(() ==> $total_awaitable);
+	// 	return new static(static::_listen_produce($race_handle, $total_awaitable));
+	// }
+	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
 		$handles = Map{};
 		$total_wait_handle = null;
 		$total_iterator = async {
@@ -121,7 +160,7 @@ class Producer<+T> implements AsyncIterator<T> {
 		$total_wait_handle = async {
 			foreach($total_iterator await as $_) {}
 		};
-		return $total_iterator;
+		return new static($total_iterator);
 	}
 	public function buffer(Producer<mixed> $signal): Producer<\ConstVector<T>> {
 		return new self(async {
@@ -143,30 +182,99 @@ class Producer<+T> implements AsyncIterator<T> {
 	// 	}
 	// }
 	
-	public function window(Producer<mixed> $signal): Producer<this> {
-		$handle = new Wrapper(new ResettableConditionWaitHandle());
-		$value_emitter = async {
-			$cloned = clone $this; // crucial this happens before later() because we must wait for `$signal` to tick once before later() resolves
-			await \HH\Asio\later(); // wait for handle to be guaranteed-set
-			foreach($cloned await as $v) {
-				await $handle->get()->succeed($v);
-			}
+	public function debounce(int $usecs): this {
+		$clone = clone $this;
+		$extendable = new Extendable(async {
+			$v = await $clone->next();
+			return Vector{ $v };
+		}); 
+		$delay_return = async (?(mixed, T) $v) ==> {
+			await \HH\Asio\usleep($usecs);
+			return $v;
 		};
-		$producer_emitter = async {
-			foreach(clone $signal await as $_) {
-				$handle->set(new ResettableConditionWaitHandle(() ==> $value_emitter));
-				yield new static(static::_listen_produce($handle->get(), $value_emitter));
+		return new static(new EmitIterator(Vector{
+			async (EmitTrigger<T> $trigger) ==> {
+				// await $extendable; // race condition anywhere?
+				$lifetime = $clone->get_lifetime();
+				while(!\HH\Asio\has_finished($lifetime)) {
+					$V = await $extendable;
+					$last = $V->lastValue();
+					invariant(!is_null($last), 'Can\'t be `null`: `Extendable` initialized with at least one value.');
+					$trigger($last[1]); // `$last[1]` is the value of the key-value pair returned by $clone->next()
+				}
 			}
-		};
-		$handle->get()->set(() ==> $value_emitter);
-		return new static($producer_emitter);
+		}, async (Vector<Awaitable<mixed>> $total) ==> {
+			$first = await $extendable;
+			$extendable->soft_extend($delay_return($first->lastValue()));
+			await \HH\Asio\v($total->concat(Vector{
+				async {
+					do {
+						$v = await $clone->next();
+						$extendable->soft_extend($delay_return($v));
+					}
+					while(!is_null($v));
+				}
+			}));
+		}));
 	}
 	
-	public async function collapse(): Awaitable<\ConstVector<T>> {
-		$accumulator = Vector{};
-		foreach(clone $this await as $v)
-			$accumulator->add($v);
-		return $accumulator;
+	// public function debounce(int $usecs): this {
+	// 	$wait_handle = new ResettableConditionWaitHandle();
+	// 	$value_emitter = new Wrapper(new TotalAwaitable());
+	// 	async {
+	// 		$cloned = clone $this;
+	// 		await \HH\Asio\later();
+	// 		foreach($cloned await as $v)
+	// 			await $value_emitter->get()->add(async {
+	// 				await \HH\Asio\usleep($usecs);
+	// 			});
+	// 	};
+	// 	return new static(self::_listen_produce($wait_handle));
+	// }
+	
+	public function window(Producer<mixed> $signal): Producer<this> {
+		return new static(async {
+			foreach($signal await as $_)
+				yield new static(
+					new EmitIterator(
+						Vector{
+							async (EmitTrigger<T> $trigger) ==> {
+								foreach(clone $this await as $v)
+									$trigger($v);
+							}
+						},
+						(Vector<Awaitable<mixed>> $total) ==>
+							Producer::from_nonblocking($total->concat(Vector{ $signal->next() }))
+					              ->first() // race the next signal tick and the bulk emitter total
+            	)
+				);
+		});
+	}
+	// public function window(Producer<mixed> $signal): Producer<this> {
+	// 	$handle = new Wrapper(new ResettableConditionWaitHandle());
+	// 	$value_emitter = async {
+	// 		$cloned = clone $this; // crucial this happens before later() because we must wait for `$signal` to tick once before later() resolves
+	// 		await \HH\Asio\later(); // wait for handle to be guaranteed-set
+	// 		foreach($cloned await as $v) {
+	// 			await $handle->get()->succeed($v);
+	// 		}
+	// 	};
+	// 	$producer_emitter = async {
+	// 		foreach(clone $signal await as $_) {
+	// 			$handle->set(new ResettableConditionWaitHandle(() ==> $value_emitter));
+	// 			yield new static(static::_listen_produce($handle->get(), $value_emitter));
+	// 		}
+	// 	};
+	// 	$handle->get()->set(() ==> $value_emitter);
+	// 	return new static($producer_emitter);
+	// }
+	public function sample(Producer<mixed> $signal): Producer<?T> {
+		return new static(async {
+			foreach($this->window($signal) await as $producer) {
+				$v = await $producer->last();
+				yield $v;
+			}
+		});
 	}
 	
 	public final static function defer((function(): Producer<T>) $factory): this {
