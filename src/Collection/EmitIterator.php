@@ -1,8 +1,9 @@
 <?hh // strict
 namespace HHReactor\Collection;
+use HHReactor\Asio\ExtendableLifetime;
 class EmitIterator<+T> implements AsyncIterator<T> {
 	private ConditionWaitHandle<mixed> $bell;
-	private Awaitable<void> $total_awaitable;
+	private ExtendableLifetime $total_awaitable;
 	private Queue<T> $lag;
 	public function __construct(
 		Vector<(function(EmitTrigger<T>): Awaitable<mixed>)> $emitters,
@@ -10,13 +11,13 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		Vector<Awaitable<mixed>> $sidechain = Vector{}
 	) {
 		$trigger = (T $v) ==> $this->_emit($v); // publicize `_emit` trigger for emitters
-		$this->total_awaitable = async {
+		$this->total_awaitable = new ExtendableLifetime(async {
 			await \HH\Asio\later();
 			await $reducer(
 				$emitters->map(($emitter) ==> $emitter($trigger))
                      ->concat($sidechain)
 			);
-		};
+		});
 		$this->bell = ConditionWaitHandle::create($this->total_awaitable->getWaitHandle());
 		$this->lag = new Queue();
 	}
@@ -27,6 +28,9 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		if(!$this->bell->isFinished())
 			$this->bell->succeed(null);
 		$this->lag->add($v);
+	}
+	public function sidechain(Awaitable<void> $incoming): void {
+		$this->total_awaitable->soft_extend($incoming);
 	}
 	public async function next(): Awaitable<?(mixed, T)> {
 		if($this->lag->is_empty()) {

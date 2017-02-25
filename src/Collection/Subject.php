@@ -26,6 +26,9 @@ class Subject<T> implements AsyncIterator<T> {
 	public function attach((function(this): Awaitable<void>) $emitter): void {
 		$this->total_awaitable->soft_extend($emitter($this));
 	}
+	public function sidechain(Awaitable<void> $incoming): void {
+		$this->total_awaitable->soft_extend($incoming);
+	}
 	public function emit(T $v): void {
 		// contrast public `emit` with private `EmitIterator::_emit`
 		if(!$this->bell->isFinished())
