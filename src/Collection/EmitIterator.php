@@ -17,20 +17,27 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	 * @param $sidechain - Any Awaitables that do not emit items but affect the `$emitters` through shared scope to be `await`ed within the lifetime.
 	 */
 	public function __construct(
-		Vector<(function(EmitTrigger<T>): Awaitable<mixed>)> $emitters,
-		(function(Vector<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v'),
-		Vector<Awaitable<mixed>> $sidechain = Vector{}
+		Vector<(function(EmitAppender<T>): AsyncIterator<T>)> $emitters,
+		(function(Vector<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')
 	) {
-		$trigger = (T $v) ==> $this->_emit($v); // publicize `_emit` trigger for emitters
+		$appender = (AsyncIterator<T> $v) ==> $this->_append($v); // publicize `_append` for emitters
 		$this->total_awaitable = new ExtendableLifetime(async {
-			await \HH\Asio\later();
+			await \HH\Asio\later(); // guarantee bell is set
 			await $reducer(
-				$emitters->map(($emitter) ==> $emitter($trigger))
-                     ->concat($sidechain)
+				$emitters->map(($emitter) ==> $this->_awaitify($emitter($appender)))
 			);
 		});
 		$this->bell = ConditionWaitHandle::create($this->total_awaitable->getWaitHandle());
 		$this->lag = new Queue();
+	}
+	
+	private function _append(AsyncIterator<T> $incoming): void {
+		$this->total_awaitable->soft_extend($this->_awaitify($incoming));
+	}
+	
+	private async function _awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
+		foreach($incoming await as $v)
+			$this->_emit($v);
 	}
 	
 	/**

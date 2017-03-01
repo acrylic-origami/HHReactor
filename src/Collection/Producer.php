@@ -5,7 +5,8 @@ use HHReactor\Asio\{
 	Haltable,
 	Extendable,
 	ExtendableLifetime,
-	HaltResult
+	HaltResult,
+	DelayedEmptyAsyncIterator
 };
 use HHReactor\Wrapper;
 <<__ConsistentConstruct>>
@@ -229,59 +230,54 @@ class Producer<+T> implements AsyncIterator<T>, IHaltable {
 	 * **Timing**:
 	 * - **Predicted**:
 	 *   - `Tv`-typed items from the return value may not preserve the order they are produced in _separate_ Producers created by `$meta`.
-	 *   - However, `Tv`-typed items  from the return value originating from _the same_ `$meta`-created Producer must preserve the order they are originally produced (must assume {@see HHReactor\Asio\Subject::emit()} preserves call order).
+	 *   - However, `Tv`-typed items  from the return value originating from _the same_ `$meta`-created Producer must preserve the order they are originally produced (must assume yielding preserves call order).
 	 * - **Preferred**:
 	 *   - All ordering must be preserved.
 	 * @param $meta - Transform `T`-valued items to Producers. E.g. for `T := Producer<Tv>`, $meta may just be the identity function.
 	 */
 	public function flat_map<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
-		$subject = new Subject(Vector{
-			async (Subject<Tv> $subject) ==> {
+		return new static(new EmitIterator(Vector{
+			(EmitAppender<Tv> $appender) ==> new DelayedEmptyAsyncIterator(async {
 				foreach($clone await as $seed) {
 					$subclone = clone $meta($seed);
-					$subject->attach(async (Subject<Tv> $subject) ==> {
-						foreach($subclone await as $v)
-							$subject->emit($v);
-					});
+					$appender($subclone);
 				}
-			}
-		});
-		return new static($subject);
+			})
+		}));
 	}
 	/**
 	 * [Convert an Observable that emits Observables into a single Observable that emits the items emitted by the most-recently-emitted of those Observables](http://reactivex.io/documentation/operators/switch.html)
 	 * 
 	 * **Timing**:
-	 * - Depends heavily on {@see HHReactor\Asio\Subject}
+	 * - Depends heavily on {@see HHReactor\Asio\EmitIterator}
 	 * - **Predicted**:
 	 *   - In general, it is possible no `Tv`-typed items are prevented from being emitted, if all `Tv` items from the current `Producer<Tv>` are produced in the same ready queue as the next `Producer<Tv>` is produced.
-	 *   - However, items produced by an overtaking `Producer<Tv>` must not emit before items of the `Producer<Tv>` it is overtaking (must assume {@see HHReactor\Asio\Subject::emit()} preserves call order).
+	 *   - However, items produced by an overtaking `Producer<Tv>` must not emit before items of the `Producer<Tv>` it is overtaking (must assume yielding preserves call order).
 	 *   - The beginning events of the `Producer<Tv>`s must preserve the order of the original items.
 	 * - **Preferred**
 	 *   - Values produced in the current Producer after the underlying event for the next item in the original Producer resolves must not be included in the return value.
 	 * @param $meta - Transform `T`-valued items to Producers. E.g. for `T := Producer<Tv>`, $meta may just be the identity function.
 	 */
-	// public function switch<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
-	// 	$clone = clone $this;
-	// 	$subject = new Subject(Vector{
-	// 		async (Subject<Tv> $subject) ==> {
-	// 			$current_idx = new Wrapper(-1);
-	// 			foreach($clone await as $seed) {
-	// 				$i = $current_idx->get();
-	// 				$current_idx->set(++$i);
+	public function switch_on_next<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
+		$clone = clone $this;
+		return new static(new EmitIterator(Vector{
+			(EmitAppender<Tv> $appender) ==> new DelayedEmptyAsyncIterator(async {
+				$current_idx = new Wrapper(-1);
+				foreach($clone await as $seed) {
+					$i = $current_idx->get();
+					$current_idx->set(++$i);
 					
-	// 				$subclone = clone $meta($seed);
-	// 				$subject->attach(async (Subject<Tv> $subject) ==> {
-	// 					foreach($subclone await as $v)
-	// 						if($current_idx->get() === $i) // eh, not the most performant way... but meh, until it becomes a problem
-	// 							$subject->emit($v);
-	// 				});
-	// 			}
-	// 		}
-	// 	});
-	// 	return new static($subject);
-	// }
+					$subclone = clone $meta($seed);
+					$appender(async {
+						foreach($subclone await as $v)
+							if($current_idx->get() === $i) // eh, not the most performant way... but meh, until it becomes a problem
+								yield $v;
+					});
+				}
+			})
+		}));
+	}
 	/**
 	 * [Divide an Observable into a set of Observables that each emit a different subset of items from the original Observable.](http://reactivex.io/documentation/operators/groupby.html)
 	 * **Timing**:
@@ -358,14 +354,14 @@ class Producer<+T> implements AsyncIterator<T>, IHaltable {
 			return $v;
 		};
 		return new static(new EmitIterator(Vector{
-			async (EmitTrigger<T> $trigger) ==> {
+			async ($_) ==> {
 				// await $extendable; // race condition anywhere?
 				$lifetime = $clone->get_lifetime();
 				while(!\HH\Asio\has_finished($lifetime)) {
 					$V = await $extendable;
 					$last = $V->lastValue();
 					if(!is_null($last))
-						$trigger($last[1]); // `$last[1]` is the value of the key-value pair returned by $clone->next()
+						yield $last[1]; // `$last[1]` is the value of the key-value pair returned by $clone->next()
 				}
 			}
 		}, async (Vector<Awaitable<mixed>> $total) ==> {
@@ -400,9 +396,9 @@ class Producer<+T> implements AsyncIterator<T>, IHaltable {
 				yield new static(
 					new EmitIterator(
 						Vector{
-							async (EmitTrigger<T> $trigger) ==> {
+							async ($_) ==> {
 								foreach($clone await as $v)
-									$trigger($v);
+									yield $v;
 							}
 						},
 						(Vector<Awaitable<mixed>> $total) ==>
@@ -571,19 +567,19 @@ class Producer<+T> implements AsyncIterator<T>, IHaltable {
 	public static function combine_latest<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu, Tv): Tx) $combinator): Producer<Tx> {
 		$latest = tuple(null, null);
 		return new self(new EmitIterator(Vector{
-			async(EmitTrigger<Tx> $trigger) ==> {
+			async($_) ==> {
 				foreach(clone $A await as $v) {
 					$latest[0] = $v;
 					list($u, $v) = $latest;
 					if(!is_null($u) && !is_null($v))
-						$trigger($combinator($u, $v));
+						yield $combinator($u, $v);
 				}
-			}, async(EmitTrigger<Tx> $trigger) ==> {
+			}, async($_) ==> {
 				foreach(clone $B await as $v) {
 					$latest[1] = $v;
 					list($u, $v) = $latest;
 					if(!is_null($u) && !is_null($v))
-						$trigger($combinator($u, $v));
+						yield $combinator($u, $v);
 				}
 			}
 		}));
@@ -592,27 +588,27 @@ class Producer<+T> implements AsyncIterator<T>, IHaltable {
 		// ..gggghhhhhaaah...
 		$latest_timer = tuple(async {}, async {});
 		$latest = tuple(null, null);
-		return new static(new Subject(Vector{
-			async (Subject<Tx> $subject) ==> {
+		return new static(new EmitIterator(Vector{
+			async (EmitAppender<Tx> $appender) ==> {
 				foreach(clone $A await as $u) {
 					$latest_timer[0] = $A_timer($u);
 					$latest[0] = $u;
 					
 					$v = $latest[1];
-					$subject->sidechain($latest_timer[0]);
+					$appender(new DelayedEmptyAsyncIterator($latest_timer[0]));
 					if(!is_null($v) && !\HH\Asio\has_finished($latest_timer[1]))
-						$subject->emit($combinator($u, $v));
+						yield $combinator($u, $v);
 				}
 			},
-			async (Subject<Tx> $subject) ==> {
+			async (EmitAppender<Tx> $appender) ==> {
 				foreach(clone $B await as $v) {
 					$latest_timer[1] = $B_timer($v);
 					$latest[1] = $v;
 					
 					$u = $latest[0];
-					$subject->sidechain($latest_timer[1]);
+					$appender(new DelayedEmptyAsyncIterator($latest_timer[1]));
 					if(!is_null($u) && !\HH\Asio\has_finished($latest_timer[0]))
-						$subject->emit($combinator($u, $v));
+						yield $combinator($u, $v);
 				}
 			}
 		}));
