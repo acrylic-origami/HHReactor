@@ -4,7 +4,9 @@ use HHReactor\Asio\ExtendableLifetime;
 /**
  * Analogous to AsyncIterators via async block + `yield`, merged together. Greater control of lifetime by {@see HHReactor\Collection\EmitIterator::reducer}. No emitters can be added after construction.
  * 
- * Outside of lifetime control, this is implementable with {@see HHReactor\Collection\Producer} and its {@see HHReactor\Collection\Producer::merge()}.
+ * The distinguishing factors from {@see HHReactor\Collection\Producer} and its {@see HHReactor\Collection\Producer::merge()} are:
+ * 1. The ability to append in the future (from the scope of the original emitters),
+ * 2. Control over the lifetime of the iterator.
  */
 class EmitIterator<+T> implements AsyncIterator<T> {
 	private ConditionWaitHandle<mixed> $bell;
@@ -12,7 +14,7 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	private Queue<T> $lag;
 	/**
 	 * Create lifetime for the Iterator by transforming a collection of "emitters" by some reducing function.
-	 * @param $emitters - Maybe call the `EmitTrigger` to broadcast a value eventually to consumers of this EmitIterators.
+	 * @param $emitters - Maybe yield values, maybe add another emitter. These certainly may be `Awaitable`s in disguise wanting to be sidechained.
 	 * @param $reducer - Transform the `$emitters` into an Awaitable.
 	 * @param $sidechain - Any Awaitables that do not emit items but affect the `$emitters` through shared scope to be `await`ed within the lifetime.
 	 */
@@ -31,10 +33,22 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		$this->lag = new Queue();
 	}
 	
+	/**
+	 * Add an emitter; merge the yielded values into the original iterator.
+	 * 
+	 * **Timing**:
+	 * - All values yielded by the incoming `AsyncIterator` after this method call must be included in the original iterator, even if the incoming `AsyncIterator` is `await`ed elsewhere.
+	 * - Values yielded by the incoming `AsyncIterator` may be yielded in the original `AsyncIterator` at any time in the future depending on the ready queue, and may be yielded in ready-wait fashion.
+	 * - The relative order of items yielded by the incoming `AsyncIterator` must be preserved in the original iterator.
+	 * @param $incoming - Emit zero or more values to be included in the original Iterator. This may certainly be an `Awaitable` wanting to be sidechained.
+	 */
 	private function _append(AsyncIterator<T> $incoming): void {
 		$this->total_awaitable->soft_extend($this->_awaitify($incoming));
 	}
 	
+	/**
+	 * Iterator -> Awaitable, emitting yielded values to the original iterator.
+	 */
 	private async function _awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
 		foreach($incoming await as $v)
 			$this->_emit($v);
