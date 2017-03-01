@@ -9,10 +9,16 @@
 	},
 	"require": {
 		"hhvm": "^3.16",
-		"facebook/hhvm-autoload": "~1.2",
-		"91carriage/phpunit-hhi": "~5.6"
+		"91carriage/phpunit-hhi": "~5.6",
+		"phpdocumentor/reflection-docblock": "~2.0",
+		"phpdocumentor/phpdocumentor": "~2.8",
+		"appertly/hphpdoc": "dev-master"
 	},
 	"require-dev": {
 		"phpunit/phpunit": "~5.6"
-	}
+	},
+	"repositories": [{
+		"type": "vcs",
+		"url": "https://github.com/acrylic-origami/hphpdoc.git"
+	}]
 }

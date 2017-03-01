@@ -2,7 +2,7 @@
 namespace HHReactor\Producer;
 use HHReactor\Collection\Producer;
 
-function HTTPProducer(private int $port, private string $host = '127.0.0.1'): Producer<string> {
+function HTTPProducer(int $port, string $host = '127.0.0.1'): Producer<string> {
 	$server = stream_socket_server(sprintf('tcp://%s:%d', $host, $port));
 	stream_set_blocking($server, false);
 	return new Producer(async {

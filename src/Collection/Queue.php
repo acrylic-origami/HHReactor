@@ -25,6 +25,7 @@ class Queue<T> { // extends WeakArtificialKeyedIterable<mixed, T>
 		$this->head = new Wrapper($head);
 	}
 	public function __clone(): void {
+		// Separate pointers to the head of the queue, but keep sharing the tail pointer
 		if(!is_null($this->head->get()))
 			$this->head = clone $this->head;
 	}

@@ -13,6 +13,7 @@ abstract class Recyclable<T> implements Awaitable<T> {
 		/* HH_IGNORE_ERROR[4110] $v['result'] is always type T (which may or may not be nullable) because !_halted */
 		$this->total_awaitable = async {
 			do {
+				invariant(!\HH\Asio\has_finished($this->partial), 'Implementation error: underlying awaitable not replaced properly/quickly enough. Aborting to prevent infinite loop.');
 				$v = await $this->partial;
 			}
 			while(!$v['_halted']);

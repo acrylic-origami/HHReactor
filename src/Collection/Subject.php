@@ -1,6 +1,11 @@
 <?hh // strict
 namespace HHReactor\Collection;
 use HHReactor\Asio\ExtendableLifetime;
+/**
+ * Allow any scope to add emitters at any time during the lifetime of the instance.
+ * 
+ * (Caveat: possible to make covariant and restrict to only the original emitters, which is the only scope it is used in all functionality in HHReactor so far. The only downside is the cumber of the argument signatures for the functions that must both emit and add emitters. Much easier to just hand the whole `this` type to them.)
+ */
 class Subject<T> implements AsyncIterator<T> {
 	protected ConditionWaitHandle<mixed> $bell;
 	protected ExtendableLifetime $total_awaitable;

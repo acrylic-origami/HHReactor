@@ -26,9 +26,9 @@ class AsyncIteratorWrapper<+T> implements AsyncIterator<HaltResult<T>>, IHaltabl
 		$result = $next['result'] ?? tuple(null, null);
 		return tuple($result[0], shape('_halted' => $next['_halted'], 'result' => $result[1]));
 	}
-	public async function halt(?\Exception $e = null): Awaitable<void> {
+	public function soft_halt(?\Exception $e = null): void {
 		$handle = $this->handle;
 		invariant(!is_null($handle), 'Attempted to halt producer before starting iteration.');
-		await $handle->halt($e);
+		$handle->soft_halt($e);
 	}
 }

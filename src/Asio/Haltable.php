@@ -1,7 +1,18 @@
 <?hh // strict
 namespace HHReactor\Asio;
+/**
+ * Emit value unless interrupted
+ */
 class Haltable<+T> implements Awaitable<HaltResult<T>> {
 	private ConditionWaitHandle<HaltResult<T>> $handle;
+	/**
+	 * Set up notifier of default value. Check if provided `Awaitable` is ready-wait.
+	 * 
+	 * **Timing**
+	 * - **Predicted**
+	 *   - If `$awaitable` is ready-wait, then this Haltable must also be ready-wait.
+	 * @param $awaitable - Resolve to default value this Haltable will mirror if not halted.
+	 */
 	public function __construct(private Awaitable<T> $awaitable) {
 		$this->handle = ConditionWaitHandle::create(\HH\Asio\later()->getWaitHandle());
 		$notifier = async {
@@ -21,20 +32,34 @@ class Haltable<+T> implements Awaitable<HaltResult<T>> {
 			$this->handle = ConditionWaitHandle::create($notifier->getWaitHandle());
 		}
 	}
+	
 	public function getWaitHandle(): WaitHandle<HaltResult<T>> {
 		return $this->handle;
 	}
-	public async function halt(?\Exception $e = null): Awaitable<void> {
-		// to be used in async code, where idempotency is not expected, and instant propagation is
-		$this->soft_halt($e);
-		await \HH\Asio\later();
-	}
+	
+	// <<__Deprecated('Misleading behavior: when used with the intention of resetting, there is no guarantee the reset operation will happen immediately after halting, despite immediately returning control.')>>
+	// public async function halt(?\Exception $e = null): Awaitable<void> {
+	// 	// to be used in async code, where idempotency is not expected, and instant propagation is
+	// 	$this->soft_halt($e);
+	// 	await \HH\Asio\later();
+	// }
+	
+	/**
+	 * Check if the Haltable was halted to a finish.
+	 */
 	public function is_halted(): bool {
 		return $this->handle->isFinished() && $this->handle->result()['_halted'];
 	}
 	
+	/**
+	 * Halt without immediately returning control to the top level `HH\Asio\join`. Note: one-time, not idempotent.
+	 * 
+	 * **Timing**:
+	 * - **Predicted**:
+	 *   - This Haltable must be resolved when this call finishes.
+	 * @param $e - An exception to propagate if desired.
+	 */
 	public function soft_halt(?\Exception $e = null): void {
-		// to be used in synchronous code, where idempotent behaviour is expected
 		if(!is_null($e))
 			$this->handle->fail($e);
 		else
