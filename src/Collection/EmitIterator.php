@@ -2,7 +2,7 @@
 namespace HHReactor\Collection;
 use HHReactor\Asio\ExtendableLifetime;
 /**
- * Analogous to AsyncIterators via async block + `yield`, merged together. Greater control of lifetime by {@see HHReactor\Collection\EmitIterator::reducer}. No emitters can be added after construction.
+ * Analogous to AsyncIterators via async block + `yield`, merged together. Greater control of lifetime by {@see HHReactor\Collection\EmitIterator::reducer}.
  * 
  * The distinguishing factors from {@see HHReactor\Collection\Producer} and its {@see HHReactor\Collection\Producer::merge()} are:
  * 1. The ability to append in the future (from the scope of the original emitters),
