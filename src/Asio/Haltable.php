@@ -9,7 +9,7 @@ class Haltable<+T> implements Awaitable<HaltResult<T>> {
 	 * Set up notifier of default value. Check if provided `Awaitable` is ready-wait.
 	 * 
 	 * **Timing**
-	 * - **Predicted**
+	 * - **Spec**
 	 *   - If `$awaitable` is ready-wait, then this Haltable must also be ready-wait.
 	 * @param $awaitable - Resolve to default value this Haltable will mirror if not halted.
 	 */
@@ -55,7 +55,7 @@ class Haltable<+T> implements Awaitable<HaltResult<T>> {
 	 * Halt without immediately returning control to the top level `HH\Asio\join`. Note: one-time, not idempotent.
 	 * 
 	 * **Timing**:
-	 * - **Predicted**:
+	 * - **Spec**:
 	 *   - This Haltable must be resolved when this call finishes.
 	 * @param $e - An exception to propagate if desired.
 	 */

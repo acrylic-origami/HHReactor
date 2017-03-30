@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh // decl
 namespace HHReactor\Test\Classwise;
 use HHReactor\Collection\Producer;
 use HHReactor\Test\Classwise\Producer\ProducerVector;
@@ -13,7 +13,7 @@ abstract class ProducerTest<T> extends TestCase {
 				$accumulator->add($v);
 			return $accumulator;
 		});
-		$this->assertEquals($vec, $test, ($ordered ? '' : 'un').'ordered', 0.0, 10, !$ordered);
+		return $this->equalTo($vec, $test, ($ordered ? '' : 'un').'ordered', 0.0, 10, !$ordered);
 	}
 	protected function _producer_producer_equality(Producer<T> $p1, Producer<T> $p2): bool {
 		$v2 = \HH\Asio\join(async {

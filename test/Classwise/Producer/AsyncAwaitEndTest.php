@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh // decl
 namespace HHReactor\Test\Classwise\Producer;
 use HHReactor\Test\Classwise\ProducerTest;
 use HHReactor\Test\CustomException;
