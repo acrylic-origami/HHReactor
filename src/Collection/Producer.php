@@ -30,7 +30,7 @@ use HHReactor\Wrapper;
 class Producer<+T> extends EmitIterator<T> {
 	// MUST CLONE TO SEPARATE POINTERS
 	public function __construct(AsyncIterator<T> $iterator) {
-		parent::__construct(self::_iterators_to_emitters(Vector{ $iterator })); // in the lack of constructor overloading
+		parent::__construct(($_) ==> Vector{ $iterator }); // in the lack of constructor overloading
 	}
 	
 	/**
@@ -148,16 +148,15 @@ class Producer<+T> extends EmitIterator<T> {
 	public function flat_map<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
 		return new static(new EmitIterator(
-			($emittee) ==> Vector{ async {
-				foreach($clone await as $seed) {
-					$subclone = clone $meta($seed);
-					yield async {
-						foreach($subclone await as $v)
-							$emittee($v);
-					};
-				}
+			($appender) ==> Vector{
+				new DelayedEmptyAsyncIterator(async {
+					foreach($clone await as $seed) {
+						$subclone = clone $meta($seed);
+						$appender($subclone);
+					}
+				})
 			}
-		}));
+		));
 	}
 	/**
 	 * [Convert an Observable that emits Observables into a single Observable that emits the items emitted by the most-recently-emitted of those Observables](http://reactivex.io/documentation/operators/switch.html)
@@ -175,21 +174,23 @@ class Producer<+T> extends EmitIterator<T> {
 	public function switch_on_next<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
 		return new static(new EmitIterator(
-			($emittee) ==> Vector{ async {
-				$current_idx = new Wrapper(-1);
-				foreach($clone await as $seed) {
-					$i = $current_idx->get();
-					$current_idx->set(++$i);
-					
-					$subclone = clone $meta($seed);
-					yield async {
-						foreach($subclone await as $v)
-							if($current_idx->get() === $i) // eh, not the most performant way... but meh, until it becomes a problem
-								$emittee($v);
-					};
-				}
+			($appender) ==> Vector{
+				new DelayedEmptyAsyncIterator(async {
+					$current_idx = new Wrapper(-1);
+					foreach($clone await as $seed) {
+						$i = $current_idx->get();
+						$current_idx->set(++$i);
+						
+						$subclone = clone $meta($seed);
+						$appender(async {
+							foreach($subclone await as $v)
+								if($current_idx->get() === $i) // eh, not the most performant way... but meh, until it becomes a problem
+									yield $v;
+						});
+					}
+				})
 			}
-		}));
+		));
 	}
 	/**
 	 * [Divide an Observable into a set of Observables that each emit a different subset of items from the original Observable.](http://reactivex.io/documentation/operators/groupby.html)
@@ -205,18 +206,30 @@ class Producer<+T> extends EmitIterator<T> {
 	 */
 	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
 		$clone = clone $this;
-		$emittees = Map{};
-		return new static(EmitIterator::create_by_unicasting_emittee(
-			async ($emittee) ==> {
-				foreach($clone await as $v) {
-					$key = $keysmith($v);
-					if(!$emittees->containsKey($key))
-						// add emittee
-						$emittee(new static(EmitIterator::create_by_unicasting_emittee(async ($subemittee) ==> $emittees->set($key, $subemittee))));
-					$emittees[$key]($v);
+		$handles = Map{};
+		return new static(async {
+			foreach($clone await as $v) {
+				$key = $keysmith($v);
+				if(!$handles->containsKey($key)) {
+					// add emittee
+					$handles->set($key, ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ $clone }, Vector{ \HH\Asio\later() })->getWaitHandle())); // later() for just in case iterator has finished: we don't want the ConditionWaitHandle to throw.
+					$handles[$key]->succeed($v);
+					yield new static(async {
+						try {
+							$v = await $handles[$key];
+							$handles[$key] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ $clone })->getWaitHandle());
+							yield $v;
+						}
+						catch(\InvalidArgumentException $e) {
+							if($e->getMessage() !== 'ConditionWaitHandle not notified by child.')
+								throw $e;
+						}
+					});
 				}
+				else
+					$handles[$key]->succeed($v);
 			}
-		));
+		});
 	}
 	/**
 	 * [Periodically gather items emitted by an Observable into bundles and emit these bundles rather than emitting the items one at a time.](http://reactivex.io/documentation/operators/buffer.html)
@@ -251,11 +264,11 @@ class Producer<+T> extends EmitIterator<T> {
 	public function debounce(int $usecs): this {
 		$clone = clone $this;
 		$extendable = new Wrapper(new Extendable($clone->next()));
-		return new static(new EmitIterator((Emittee<T> $emittee) ==> Vector {
+		return new static(new EmitIterator(($appender) ==> Vector {
 			async {
 				$first_vec = await $extendable->get();
 				$k_v = $first_vec->lastValue();
-				yield async {
+				$appender(new DelayedEmptyAsyncIterator(async {
 					while(!is_null($k_v)) {
 						$delayed_k_v = self::_delay_return($usecs, $k_v);
 						if($extendable->get()->getWaitHandle()->isFinished())
@@ -264,13 +277,13 @@ class Producer<+T> extends EmitIterator<T> {
 							$extendable->get()->extend($delayed_k_v);
 						$k_v = await $clone->next();
 					}
-				};
+				}));
 				// ($k_v == null) \implies (\HH\Asio\has_finished($clone))
 				while(!\HH\Asio\has_finished($clone->get_lifetime())) {
 					$V = await $extendable->get();
 					$last = $V->lastValue();
 					if(!is_null($last))
-						$emittee($last[1]);
+						yield $last[1];
 				}
 			}
 		}));
@@ -288,8 +301,8 @@ class Producer<+T> extends EmitIterator<T> {
 		$clone = clone $this;
 		return new static(async {
 			while(!$signal->is_finished() && !$clone->is_finished()) {
-				$window = EmitIterator::create_from_iterators(
-					Vector{ $clone },
+				$window = new EmitIterator(
+					($_) ==> Vector{ $clone },
 					(Iterable<Awaitable<mixed>> $total) ==>
 						Producer::from_nonblocking($total->concat(Vector{ $signal->next() }))
 				              ->first() // race the next signal tick and the bulk emitter total
@@ -377,7 +390,7 @@ class Producer<+T> extends EmitIterator<T> {
 		});
 	}
 	public final static function merge(Iterable<this> $producers): this {
-		return new static(EmitIterator::create_from_iterators($producers));
+		return new static(new EmitIterator(($_) ==> $producers));
 	}
 	/**
 	 * [Combine the emissions of multiple Observables together via a specified function and emit single items for each combination based on the results of this function.](http://reactivex.io/documentation/operators/zip.html)
@@ -399,7 +412,7 @@ class Producer<+T> extends EmitIterator<T> {
 	}
 	public static function combine_latest<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu, Tv): Tx) $combiner): Producer<Tx> {
 		$latest = tuple(null, null);
-		return new self(EmitIterator::create_from_iterators(Vector{
+		return new self(new EmitIterator(($_) ==> Vector{
 			async {
 				foreach(clone $A await as $v) {
 					$latest[0] = $v;
@@ -422,16 +435,16 @@ class Producer<+T> extends EmitIterator<T> {
 		$latest_timer = tuple(async {}, async {});
 		$latest = tuple(null, null);
 		return new static(new EmitIterator(
-			($emittee) ==> Vector{ 
+			($appender) ==> Vector{ 
 				async {
 					foreach(clone $A await as $u) {
 						$latest_timer[0] = $A_timer($u);
 						$latest[0] = $u;
 						
 						$v = $latest[1];
-						yield $latest_timer[0];
+						$appender(new DelayedEmptyAsyncIterator($latest_timer[0]));
 						if(!is_null($v) && !\HH\Asio\has_finished($latest_timer[1]))
-							$emittee($combiner($u, $v));
+							yield $combiner($u, $v);
 					}
 				},
 				async {
@@ -440,9 +453,9 @@ class Producer<+T> extends EmitIterator<T> {
 						$latest[1] = $v;
 						
 						$u = $latest[0];
-						yield $latest_timer[1];
+						$appender(new DelayedEmptyAsyncIterator($latest_timer[1]));
 						if(!is_null($u) && !\HH\Asio\has_finished($latest_timer[0]))
-							$emittee($combiner($u, $v));
+							yield $combiner($u, $v);
 					}
 				}
 			}

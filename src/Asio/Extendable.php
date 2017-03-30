@@ -10,20 +10,26 @@ class Extendable<T> implements Awaitable<Vector<T>> {
 	/**
 	 * @var - `await`ed and recycled to push new Awaitables onto the scheduler.
 	 */
-	private Awaitable<Vector<T>> $total_awaitable;
+	private Haltable<Vector<T>> $total_awaitable;
 	private Haltable<mixed> $partial;
 	public function __construct(Awaitable<T> $initial) {
 		$this->partial = new Haltable($initial);
 		$this->subawaitables = Vector{ $initial };
 		/* HH_IGNORE_ERROR[4110] $v['result'] is always type T (which may or may not be nullable) because !_halted */
-		$this->total_awaitable = async {
+		$this->total_awaitable = new Haltable(async {
 			do {
 				invariant(!\HH\Asio\has_finished($this->partial) || !$this->partial->getWaitHandle()->result()['_halted'], 'Implementation error: `partial` halted but not replaced. Aborting to prevent infinite loop.');
 				$v = await $this->partial;
 			}
 			while($v['_halted']);
-			return $v['result'];
-		};
+			
+			// Assuming $this->partial is updated with \HH\Asio\v; this should be done at this point.
+			return \HH\Asio\v($this->subawaitables)->getWaitHandle()->result();
+		});
+	}
+	
+	public function soft_halt(?\Exception $e = null): void {
+		$this->total_awaitable->soft_halt($e);
 	}
 	
 	/**
@@ -49,6 +55,19 @@ class Extendable<T> implements Awaitable<Vector<T>> {
 	}
 	
 	public function getWaitHandle(): WaitHandle<Vector<T>> {
-		return $this->total_awaitable->getWaitHandle();
+		return $this->_getWaitHandle()->getWaitHandle();
+	}
+	private async function _getWaitHandle(): Awaitable<Vector<T>> {
+		$halt_result = await $this->total_awaitable; // propagates exception automatically
+		// assume no exception by Haltable herein
+		if($halt_result['_halted']) {
+			// retrieve completed items
+			return $this->subawaitables->filter(($subawaitable) ==> $subawaitable->getWaitHandle()->isFinished())
+			                           ->map(($subawaitable) ==> $subawaitable->getWaitHandle()->result());
+		}
+		else {
+			/* HH_IGNORE_ERROR[4110] $halt_result['result'] is always type T (which may or may not be nullable) because !_halted */
+			return $halt_result['result'];
+		}
 	}
 }

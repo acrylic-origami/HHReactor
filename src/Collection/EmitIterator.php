@@ -1,8 +1,11 @@
 <?hh // strict
 namespace HHReactor\Collection;
-use HHReactor\Asio\Haltable;
-use HHReactor\Asio\DelayedEmptyAsyncIterator;
-use HHReactor\Asio\Extendable;
+use HHReactor\Asio\{
+	Haltable,
+	DelayedEmptyAsyncIterator,
+	Extendable,
+	Scheduler
+};
 /**
  * Analogous to AsyncIterators via async block + `yield`, merged together. Greater control of lifetime by {@see HHReactor\Collection\EmitIterator::reducer}.
  * 
@@ -30,26 +33,21 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	 * @param $emitters - Maybe yield values. Maybe add another emitter. These certainly may be `Awaitable`s in disguise just wanting to be thrown on the scheduler.
 	 * @param $reducer - Transform the `$emitters` into an Awaitable.
 	 */
-	public function __construct(
-		(function(Emittee<T>): Iterable<AsyncIterator<Awaitable<mixed>>>) $emitter_factory,
+	protected function __construct(
+		(function(Appender<T>): Iterable<AsyncIterator<T>>) $emitter_factory,
 		(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')
 	) {
-		$emittee = (T $v) ==> $this->_emit($v); // publicize `_append` for emitters
 		$this->lag = new Queue();
 		
-		$this->emitters = $emitter_factory($emittee)->map(($emitter) ==> new Haltable(async {
-			foreach($emitter await as $schedulable)
-				$this->total_awaitable->extend($schedulable);
-		}));
+		$appender = ($v) ==> $this->_append($v);
+		$this->total_awaitable = new Extendable(async {
+			await \HH\Asio\later(); // guarantee bell is set
+			await $reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter)));
+		});
+		$this->bell = ConditionWaitHandle::create(\HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle()));
 		// foreach($this->iterators as $iterator) {
 		// 	$this->_pop_ready_wait_items($iterator);
 		// }
-		
-		$this->total_awaitable = new Extendable(async {
-			await \HH\Asio\later(); // guarantee bell is set
-			await $reducer($this->emitters);
-		});
-		$this->bell = ConditionWaitHandle::create(\HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle()));
 	}
 	
 	// private function _pop_ready_wait_items(AsyncIteratorWrapper<T> $iterator): void {
@@ -73,18 +71,17 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	 * - The relative order of items yielded by the incoming `AsyncIterator` must be preserved in the original iterator.
 	 * @param $incoming - Emit zero or more values to be included in the original Iterator. This may certainly be an `Awaitable` wanting to be sidechained.
 	 */
-	// private function _append(AsyncIteratorWrapper<T> $incoming): void {
-	// 	$this->iterators->add($incoming);
-	// 	$this->total_awaitable->soft_extend($this->_awaitify($incoming));
-	// }
+	private function _append(AsyncIterator<T> $incoming): void {
+		$this->total_awaitable->extend($this->_awaitify($incoming));
+	}
 	
 	/**
 	 * Iterator -> Awaitable, emitting yielded values through the original `EmitIterator`.
 	 */
-	// private async function _awaitify(AsyncIterator<Awaitable<mixed>> $incoming): Awaitable<void> {
-	// 	foreach($incoming await as $v)
-	// 		$this->_emit($v);
-	// }
+	private async function _awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
+		foreach($incoming await as $v)
+			$this->_emit($v);
+	}
 	
 	/**
 	 * Separate properties of cloned EmitIterators expected to be separate.
@@ -116,7 +113,7 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	 * **Sharing**: Unisolated. Adding to the sidechain of one EmitIterator adds to the sidechain (and hence lifetimes) of all EmitIterators derived from it.
 	 * @param $incoming - `Awaitable` to add to the sidechain
 	 */
-	public function sidechain(Awaitable<mixed> $incoming): void {
+	public function schedule(Awaitable<mixed> $incoming): void {
 		$this->total_awaitable->extend($incoming);
 	}
 	/**
@@ -190,20 +187,22 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		foreach($this->emitters as $emitter)
 			$emitter->soft_halt($e);
 		
+		$this->total_awaitable->soft_halt($e);
+		
 		// ring bell idempotently
 		if(!$this->bell->isFinished())
 			$this->bell->succeed(null);
 	}
 	
-	public static function create_from_iterator<Tv>(AsyncIterator<Tv> $iterator): EmitIterator<Tv> {
-		return self::create_from_iterators(Vector{ $iterator });
-	}
+	// public static function create_from_iterator<Tv>(AsyncIterator<Tv> $iterator): EmitIterator<Tv> {
+	// 	return self::create_from_iterators(Vector{ $iterator });
+	// }
 	
-	public static function create_from_iterators<Tv>(
-		Iterable<AsyncIterator<Tv>> $iterators,
-		(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
-		return new self(self::_iterators_to_emitters($iterators), $reducer);
-	}
+	// public static function create_from_iterators<Tv>(
+	// 	Iterable<AsyncIterator<Tv>> $iterators,
+	// 	(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
+	// 	return new self(($_) ==> $iterators, $reducer);
+	// }
 	
 	public static function create_from_awaitable<Tv>(Awaitable<Tv> $awaitable): EmitIterator<Tv> {
 		return self::create_from_awaitables(Vector{ $awaitable });
@@ -211,33 +210,33 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	
 	public static function create_from_awaitables<Tv>(Iterable<Awaitable<Tv>> $awaitables): EmitIterator<Tv> {
 		return new self(
-			($emittee) ==> $awaitables->map(($awaitable) ==> new DelayedEmptyAsyncIterator(async {
+			($_) ==> $awaitables->map(async ($awaitable) ==> {
 				$v = await $awaitable;
-				$emittee($v);
-			}))
+				yield $v;
+			})
 		);
 	}
 	
-	protected static function create_by_unicasting_emittee<Tv>(
-		(function(Emittee<Tv>): Awaitable<mixed>) $importer,
-		(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
-		return self::create_by_multicasting_emittee(($emittee) ==> Vector{ $importer($emittee) });
-	}
+	// protected static function create_by_unicasting_emittee<Tv>(
+	// 	(function(Emittee<Tv>): Awaitable<mixed>) $importer,
+	// 	(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
+	// 	return self::create_by_multicasting_emittee(($emittee) ==> Vector{ $importer($emittee) });
+	// }
 	
-	protected static function create_by_multicasting_emittee<Tv>(
-		(function(Emittee<Tv>): Iterable<Awaitable<mixed>>) $importers,
-		(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
-		return new self(
-			(Emittee<Tv> $emittee) ==> $importers($emittee)->map(($importer) ==> new DelayedEmptyAsyncIterator($importer)),
-		$reducer);
-	}
+	// protected static function create_by_multicasting_emittee<Tv>(
+	// 	(function(Emittee<Tv>): Iterable<Awaitable<mixed>>) $importers,
+	// 	(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
+	// 	return new self(
+	// 		(Emittee<Tv> $emittee) ==> $importers($emittee)->map(($importer) ==> new DelayedEmptyAsyncIterator($importer)),
+	// 	$reducer);
+	// }
 	
-	protected static function _iterators_to_emitters<Tv>(Iterable<AsyncIterator<Tv>> $iterators): (function(Emittee<Tv>): Iterable<AsyncIterator<Awaitable<mixed>>>) {
-		return (Emittee<Tv> $emittee) ==> $iterators->map(($iterator) ==> {
-			return new DelayedEmptyAsyncIterator(async {
-				foreach($iterator await as $v)
-					$emittee($v);
-			});
-		});
-	}
+	// protected static function _iterators_to_emitters<Tv>(Iterable<AsyncIterator<Tv>> $iterators): (function(Emittee<Tv>): Iterable<AsyncIterator<Awaitable<mixed>>>) {
+	// 	return (Emittee<Tv> $emittee) ==> $iterators->map(($iterator) ==> {
+	// 		return new DelayedEmptyAsyncIterator(async {
+	// 			foreach($iterator await as $v)
+	// 				$emittee($v);
+	// 		});
+	// 	});
+	// }
 }
