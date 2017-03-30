@@ -41,6 +41,7 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		
 		$appender = ($v) ==> $this->_append($v);
 		$this->total_awaitable = new Extendable(async {
+			// assume $emitter stops emitting when the object reference is destroyed at the end of this async block
 			await \HH\Asio\later(); // guarantee bell is set
 			await $reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter)));
 		});
@@ -50,17 +51,17 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		// }
 	}
 	
-	// private function _pop_ready_wait_items(AsyncIteratorWrapper<T> $iterator): void {
-	// 	// weed out ready-wait items
-	// 	while(\HH\Asio\has_finished($next = $iterator->next())) {
-	// 		$concrete_next = $next->getWaitHandle()->result();
-	// 		if(!is_null($concrete_next)) {
-	// 			$this->lag->add($concrete_next[1]);
-	// 		}
-	// 		else
-	// 			return;
-	// 	}
-	// }
+	private function _pop_ready_wait_items(AsyncIteratorWrapper<T> $iterator): void {
+		// weed out ready items
+		while(\HH\Asio\has_finished($next = $iterator->next())) {
+			$concrete_next = $next->getWaitHandle()->result();
+			if(!is_null($concrete_next)) {
+				$this->lag->add($concrete_next[1]);
+			}
+			else
+				return;
+		}
+	}
 	
 	/**
 	 * Add an emitter; merge the yielded values into the original iterator.
@@ -79,7 +80,9 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	 * Iterator -> Awaitable, emitting yielded values through the original `EmitIterator`.
 	 */
 	private async function _awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
-		foreach($incoming await as $v)
+		$wrapped = new AsyncIteratorWrapper($incoming);
+		$this->_pop_ready_wait_items($wrapped);
+		foreach($wrapped await as $v)
 			$this->_emit($v);
 	}
 	
