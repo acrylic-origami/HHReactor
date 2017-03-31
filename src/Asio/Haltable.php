@@ -60,9 +60,26 @@ class Haltable<+T> implements Awaitable<HaltResult<T>> {
 	 * @param $e - An exception to propagate if desired.
 	 */
 	public function soft_halt(?\Exception $e = null): void {
-		if(!is_null($e))
+		$original_handle = $this->handle;
+		// try as hard as you can to stop the work by decrementing the refcount to the WaitHandle
+		$this->handle = ConditionWaitHandle::create(\HH\Asio\later()->getWaitHandle());
+		
+		// the below is only valid for ExternalThreadEventWaitHandle and SleepWaitHandle as of HHVM 3.16. Not terribly useful for the mainly user-land stuff we're doing here
+		// if(!is_null($e)) {
+		// 	// `try` even harder to stop the work
+		// 	try {
+		// 		\HH\Asio\cancel($this->handle, $e);
+		// 	}
+		// 	catch(\InvalidArgumentException $e) {}
+		// }
+		
+		if(!is_null($e)) {
+			$original_handle->fail($e);
 			$this->handle->fail($e);
-		else
+		}
+		else {
+			$original_handle->succeed(shape('_halted' => true, 'result' => null));
 			$this->handle->succeed(shape('_halted' => true, 'result' => null));
+		}
 	}
 }

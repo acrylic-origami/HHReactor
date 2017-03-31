@@ -44,8 +44,12 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 			// assume $emitter stops emitting when the object reference is destroyed at the end of this async block
 			await \HH\Asio\later(); // guarantee bell is set
 			await $reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter)));
+			// ring bell idempotently
+			if(!$this->bell->isFinished())
+				$this->bell->succeed(null);
 		});
-		$this->bell = ConditionWaitHandle::create(\HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle()));
+		$src = \HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle());
+		$this->bell = ConditionWaitHandle::create($src);
 		// foreach($this->iterators as $iterator) {
 		// 	$this->_pop_ready_wait_items($iterator);
 		// }
@@ -57,6 +61,7 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 			$concrete_next = $next->getWaitHandle()->result();
 			if(!is_null($concrete_next)) {
 				$this->lag->add($concrete_next[1]);
+				printf('A%d', $concrete_next[1]);
 			}
 			else
 				return;
@@ -82,8 +87,13 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 	private async function _awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
 		$wrapped = new AsyncIteratorWrapper($incoming);
 		$this->_pop_ready_wait_items($wrapped);
-		foreach($wrapped await as $v)
+		foreach($wrapped await as $v) {
+			if($this->total_awaitable->is_halted())
+				// stop emitting items immediately if this EmitIterator has been halted
+				// the GC might not be fast enough to 
+				return;
 			$this->_emit($v);
+		}
 	}
 	
 	/**
@@ -102,7 +112,10 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		// ring bell idempotently
 		if(!$this->bell->isFinished())
 			$this->bell->succeed(null);
-		$this->lag->add($v);
+		/* HH_FIXME[4110] */
+		$this->lag->add($v.'a');
+		
+		var_dump($this->lag->toVector());
 	}
 	
 	/**
@@ -130,14 +143,21 @@ class EmitIterator<+T> implements AsyncIterator<T> {
 		if($this->lag->is_empty()) {
 			if($this->bell->isFinished())
 				// idempotent reset
-				if(!\HH\Asio\has_finished($this->total_awaitable))
+				if(!$this->total_awaitable->getWaitHandle()->isFinished())
 					$this->bell = ConditionWaitHandle::create(\HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle()));
 				else
 					return null;
 			
 			await $this->bell;
 		}
-		return tuple(null, $this->lag->shift());
+		if(!$this->lag->is_empty()) {
+			// hphpd_break();
+			$v = $this->lag->shift();
+			var_dump($v);
+			return tuple(null, $v);
+		}
+		else
+			return null;
 	}
 	
 	public function is_finished(): bool {

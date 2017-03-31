@@ -389,7 +389,7 @@ class Producer<+T> extends EmitIterator<T> {
 			}
 		});
 	}
-	public final static function merge(Iterable<this> $producers): this {
+	public final static function merge(Iterable<AsyncIterator<T>> $producers): this {
 		return new static(new EmitIterator(($_) ==> $producers));
 	}
 	/**

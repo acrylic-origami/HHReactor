@@ -48,6 +48,16 @@ class AppendOnlyQueue<T> { // extends WeakArtificialKeyedIterable<mixed, T>
 		// advance tail pointer
 		$this->tail->set($next);
 	}
+	public function getIterator(): Iterator<T> {
+		$head = $this->head->get();
+		while(!is_null($head)) {
+			yield $head->get_v();
+			$head = $head->next();
+		}
+	}
+	public function toVector(): Vector<T> {
+		return new Vector($this->getIterator());
+	}
 	// public static function merge(AppendOnlyQueue<T> ... $queues): AppendOnlyQueue<T> {
 	// 	if(count($queues) === 0)
 	// 		throw new \BadMethodCallException(sprintf('Must merge at least two queues in %s.', __METHOD__));

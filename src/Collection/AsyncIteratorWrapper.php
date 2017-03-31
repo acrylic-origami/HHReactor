@@ -9,6 +9,11 @@ class AsyncIteratorWrapper<+T> implements AsyncIterator<T> {
 		if(is_null($this->handle) || $this->handle->getWaitHandle()->isFinished()) {
 			// refresh the handle if this is the first `next` call or the underlying awaitable has resolved
 			try {
+				if(!is_null($this->handle)) {
+					$result = $this->handle->getWaitHandle()->result();
+					if(!is_null($result))
+						printf("REFRESHED %s\n", $result[1]);
+				}
 				$this->handle = $this->iterator->next();
 			}
 			catch(\Exception $e) {

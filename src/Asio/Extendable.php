@@ -18,11 +18,10 @@ class Extendable<T> implements Awaitable<Vector<T>> {
 		/* HH_IGNORE_ERROR[4110] $v['result'] is always type T (which may or may not be nullable) because !_halted */
 		$this->total_awaitable = new Haltable(async {
 			do {
-				invariant(!\HH\Asio\has_finished($this->partial) || !$this->partial->getWaitHandle()->result()['_halted'], 'Implementation error: `partial` halted but not replaced. Aborting to prevent infinite loop.');
+				invariant(!$this->partial->getWaitHandle()->isFinished() || !$this->partial->getWaitHandle()->result()['_halted'], 'Implementation error: `partial` halted but not replaced. Aborting to prevent infinite loop.');
 				$v = await $this->partial;
 			}
 			while($v['_halted']);
-			
 			// Assuming $this->partial is updated with \HH\Asio\v; this should be done at this point.
 			return \HH\Asio\v($this->subawaitables)->getWaitHandle()->result();
 		});
@@ -57,6 +56,11 @@ class Extendable<T> implements Awaitable<Vector<T>> {
 	public function getWaitHandle(): WaitHandle<Vector<T>> {
 		return $this->_getWaitHandle()->getWaitHandle();
 	}
+	
+	public function is_halted(): bool {
+		return $this->total_awaitable->is_halted();
+	}
+	
 	private async function _getWaitHandle(): Awaitable<Vector<T>> {
 		$halt_result = await $this->total_awaitable; // propagates exception automatically
 		// assume no exception by Haltable herein
