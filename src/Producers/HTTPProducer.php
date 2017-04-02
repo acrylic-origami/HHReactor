@@ -5,7 +5,7 @@ use HHReactor\Collection\Producer;
 function HTTPProducer(int $port, string $host = '127.0.0.1'): Producer<string> {
 	$server = stream_socket_server(sprintf('tcp://%s:%d', $host, $port));
 	stream_set_blocking($server, false);
-	return new Producer(async {
+	return Producer::create(async {
 		do {
 			printf("Construct on port %d\n", $port);
 			$status = await stream_await($server, STREAM_AWAIT_READ, 0.0);

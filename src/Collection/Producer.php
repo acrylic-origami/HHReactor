@@ -1,14 +1,13 @@
 <?hh // strict
 namespace HHReactor\Collection;
 use HHReactor\Asio\{
-	ResettableConditionWaitHandle,
 	Haltable,
-	Extendable,
-	ExtendableLifetime,
 	HaltResult,
-	DelayedEmptyAsyncIterator
+	DelayedEmptyAsyncIterator,
+	Extendable
 };
 use HHReactor\Wrapper;
+
 <<__ConsistentConstruct>>
 /**
  * An mergeable and shareable wrapper of `AsyncIterator`.
@@ -27,11 +26,259 @@ use HHReactor\Wrapper;
  *   - _Endpoint equality_: If two endpoints are resolved at the same time, but have not yet ended any of their respective consumers, they are equal. Put a different way, endpoints are equal up to the same ready queue.
  * - _Lifetime_: The union of all arcs from the creation of the Producer to the endpoint.
  */
-class Producer<+T> extends EmitIterator<T> {
-	// MUST CLONE TO SEPARATE POINTERS
-	public function __construct(AsyncIterator<T> $iterator) {
-		parent::__construct(($_) ==> Vector{ $iterator }); // in the lack of constructor overloading
+class Producer<+T> implements AsyncIterator<T> {
+	
+	private ConditionWaitHandle<mixed> $bell;
+	private Extendable<mixed> $total_awaitable;
+	private Iterable<Haltable<mixed>> $emitters = Vector{}; // Vector<Awaitable<T>> perhaps?
+	private Queue<T> $lag;
+	/**
+	 * Create lifetime for the Iterator by transforming a collection of "emitters" by some reducing function.
+	 * 
+	 * **Timing**
+	 * - **Spec**
+	 *   - Must emit any ready-wait values from inputs in ready-wait fashion when iterated.
+	 *     - These ready-wait values may be emitted in any order.
+	 * @param $emitters - Maybe yield values. Maybe add another emitter. These certainly may be `Awaitable`s in disguise just wanting to be thrown on the scheduler.
+	 * @param $reducer - Transform the `$emitters` into an Awaitable.
+	 */
+	protected function __construct(
+		(function(Appender<T>): Iterable<AsyncIterator<T>>) $emitter_factory,
+		(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')
+	) {
+		$this->lag = new Queue();
+		
+		$appender = ($v) ==> $this->_append($v);
+		$this->total_awaitable = new Extendable(async {
+			// cannot assume $emitter stops emitting when the object reference is destroyed at the end of this async block: see self::_awaitify implementation
+			await \HH\Asio\later(); // guarantee bell is set
+			await $reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter)));
+			// ring bell idempotently
+			if(!$this->bell->isFinished())
+				$this->bell->succeed(null);
+		});
+		$src = \HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle());
+		$this->bell = ConditionWaitHandle::create($src);
+		// foreach($this->iterators as $iterator) {
+		// 	$this->_pop_ready_wait_items($iterator);
+		// }
 	}
+	
+	final public static function create(AsyncIterator<T> $iterator): this {
+		return new static(($_) ==> Vector{ $iterator });
+	}
+	protected static function create_producer<Tv>(AsyncIterator<Tv> $iterator): Producer<Tv> {
+		return new static(($_) ==> Vector{ $iterator }); // note: static here is typed differently from static in self::create(): it is DerivedType <: Producer<Tv> rather than DerivedType <: Producer<T>
+		// kinda magical tbh
+	}
+	
+	private function _pop_ready_wait_items(AsyncIteratorWrapper<T> $iterator): void {
+		// weed out ready items
+		while(\HH\Asio\has_finished($next = $iterator->next())) {
+			$concrete_next = $next->getWaitHandle()->result();
+			if(!is_null($concrete_next)) {
+				$this->lag->add($concrete_next[1]);
+				printf('A%d', $concrete_next[1]);
+			}
+			else
+				return;
+		}
+	}
+	
+	/**
+	 * Add an emitter; merge the yielded values into the original iterator.
+	 * 
+	 * **Timing**:
+	 * - All values yielded by the incoming `AsyncIterator` after this method call must be included in the original iterator, even if the incoming `AsyncIterator` is `await`ed elsewhere.
+	 * - Values yielded by the incoming `AsyncIterator` may be yielded in the original `AsyncIterator` at any time in the future depending on the ready queue, and may be yielded in ready-wait fashion.
+	 * - The relative order of items yielded by the incoming `AsyncIterator` must be preserved in the original iterator.
+	 * @param $incoming - Emit zero or more values to be included in the original Iterator. This may certainly be an `Awaitable` wanting to be sidechained.
+	 */
+	private function _append(AsyncIterator<T> $incoming): void {
+		$this->total_awaitable->extend($this->_awaitify($incoming));
+	}
+	
+	/**
+	 * Iterator -> Awaitable, emitting yielded values through the original `EmitIterator`.
+	 */
+	private async function _awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
+		$wrapped = new AsyncIteratorWrapper($incoming);
+		$this->_pop_ready_wait_items($wrapped);
+		foreach($wrapped await as $v) {
+			if($this->total_awaitable->is_halted())
+				// stop emitting items immediately if this EmitIterator has been halted
+				// the GC might not be fast enough to 
+				return;
+			$this->_emit($v);
+		}
+	}
+	
+	/**
+	 * Separate properties of cloned EmitIterators expected to be separate.
+	 */
+	public function __clone(): void {
+		// Advance queue independently, but receive new, shared values
+		$this->lag = clone $this->lag;
+	}
+	
+	/**
+	 * Broadcast the new value and ring the bell if it hasn't been rung recently
+	 * @param $v - Value to be broadcasted
+	 */
+	private function _emit(T $v): void {
+		// ring bell idempotently
+		if(!$this->bell->isFinished())
+			$this->bell->succeed(null);
+		/* HH_FIXME[4110] */
+		$this->lag->add($v.'a');
+		
+		var_dump($this->lag->toVector());
+	}
+	
+	/**
+	 * Add functionality to sidechain.
+	 * 
+	 * **Timing**:
+	 * - Depends heavily on {@see HHReactor\Asio\Extendable::soft_extend()}
+	 * - **Spec**
+	 *   - The incoming `Awaitable` may not be `await`ed on the next arc -- any number of arcs may enter the ready queue beforehand. However, it must be `await`ed eventually.
+	 * 
+	 * **Sharing**: Unisolated. Adding to the sidechain of one EmitIterator adds to the sidechain (and hence lifetimes) of all EmitIterators derived from it.
+	 * @param $incoming - `Awaitable` to add to the sidechain
+	 */
+	public function schedule(Awaitable<mixed> $incoming): void {
+		$this->total_awaitable->extend($incoming);
+	}
+	/**
+	 * Create an `Awaitable` representing the next element at time of call.
+	 * 
+	 * **Timing**:
+	 * - **Spec**
+	 *   - Any number of elements may be queued and returned in ready-wait fashion; that is, without returning control to the top level during iteration with `await as`, even if they are not produced in ready-wait fashion.
+	 */
+	public async function next(): Awaitable<?(mixed, T)> {
+		if($this->lag->is_empty()) {
+			if($this->bell->isFinished())
+				// idempotent reset
+				if(!$this->total_awaitable->getWaitHandle()->isFinished())
+					$this->bell = ConditionWaitHandle::create(\HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle()));
+				else
+					return null;
+			
+			await $this->bell;
+		}
+		if(!$this->lag->is_empty()) {
+			// hphpd_break();
+			$v = $this->lag->shift();
+			var_dump($v);
+			return tuple(null, $v);
+		}
+		else
+			return null;
+	}
+	
+	public function is_finished(): bool {
+		return $this->lag->is_empty() && $this->total_awaitable->getWaitHandle()->isFinished();
+	}
+	
+	/**
+	 * Awaitable that must resolve at some point after the endpoint.
+	 * 
+	 * **Timing**:
+	 * - **Spec**: The return value must not resolve faster than the Producer is `halt`ed, throws an Exception, or runs out of values. The return value may resolve at _any point_ afterwards, but must resolve eventually.
+	 * 
+	 * **Sharing**: Isolated. Lifetimes of cloned and derivative Producers must not affect the Timing clauses of each other.
+	 */
+	public function get_lifetime(): Awaitable<mixed> {
+		return $this->total_awaitable;
+	}
+	
+	/**
+	 * Iterator to dispense values produced since the last call to {@see HHReactor\Collection\Producer::next()} or {@see HHReactor\Collection\Producer::fast_forward()}.
+	 * 
+	 * **Timing**: No known timing issues.
+	 * 
+	 * **Sharing**: Isolated. Fast-forwarding one Producer does not fast-forward cloned Producers.
+	 */
+	public function fast_forward(): Iterator<T> {
+		// no risk of "Generator already started" or "Changed during iteration" exceptions, because there are no underlying core Hack collections in LinkedList iterables
+		while(!$this->lag->is_empty()) {
+			$next = $this->lag->shift();
+			if(!is_null($next))
+				yield $next;
+		}
+	}
+	
+	/**
+	 * Stop EmitIterator from broadcasting values.
+	 * 
+	 * **Timing**:
+	 * - **Spec**: 
+	 *   - Depends heavily on {@see HHReactor\Collection\EmitIterator::next()}
+	 *   - Any items produced before `await`ing the return value, including those during the current async arc, must eventually be broadcasted. This arc ends when the return value is `await`ed.
+	 * - **Preferred**: All pending calls to {@see HHReactor\Collection\Producer::next()} would immediately return `null` after control is returned to the top scope, ending all consumers of the Producer.
+	 * 
+	 * **Sharing**: Unisolated. Halting one Producer halts all cloned Producers.
+	 * @see HHReactor\Asio\Haltable
+	 * @param $e - Halt with Exception, or only with signal
+	 * @return
+	 */
+	public function soft_halt(?\Exception $e = null): void {
+		foreach($this->emitters as $emitter)
+			$emitter->soft_halt($e);
+		
+		$this->total_awaitable->soft_halt($e);
+		
+		// ring bell idempotently
+		if(!$this->bell->isFinished())
+			$this->bell->succeed(null);
+	}
+	
+	// public static function create_from_iterator<Tv>(AsyncIterator<Tv> $iterator): EmitIterator<Tv> {
+	// 	return self::create_from_iterators(Vector{ $iterator });
+	// }
+	
+	// public static function create_from_iterators<Tv>(
+	// 	Iterable<AsyncIterator<Tv>> $iterators,
+	// 	(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
+	// 	return new self(($_) ==> $iterators, $reducer);
+	// }
+	
+	final public static function create_from_awaitable(Awaitable<T> $awaitable): this {
+		return self::create_from_awaitables(Vector{ $awaitable });
+	}
+	
+	final public static function create_from_awaitables(Iterable<Awaitable<T>> $awaitables): this {
+		return new static(
+			($_) ==> $awaitables->map(async ($awaitable) ==> {
+				$v = await $awaitable;
+				yield $v;
+			})
+		);
+	}
+	
+	// protected static function create_by_unicasting_emittee<Tv>(
+	// 	(function(Emittee<Tv>): Awaitable<mixed>) $importer,
+	// 	(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
+	// 	return self::create_by_multicasting_emittee(($emittee) ==> Vector{ $importer($emittee) });
+	// }
+	
+	// protected static function create_by_multicasting_emittee<Tv>(
+	// 	(function(Emittee<Tv>): Iterable<Awaitable<mixed>>) $importers,
+	// 	(function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')): EmitIterator<Tv> {
+	// 	return new self(
+	// 		(Emittee<Tv> $emittee) ==> $importers($emittee)->map(($importer) ==> new DelayedEmptyAsyncIterator($importer)),
+	// 	$reducer);
+	// }
+	
+	// protected static function _iterators_to_emitters<Tv>(Iterable<AsyncIterator<Tv>> $iterators): (function(Emittee<Tv>): Iterable<AsyncIterator<Awaitable<mixed>>>) {
+	// 	return (Emittee<Tv> $emittee) ==> $iterators->map(($iterator) ==> {
+	// 		return new DelayedEmptyAsyncIterator(async {
+	// 			foreach($iterator await as $v)
+	// 				$emittee($v);
+	// 		});
+	// 	});
+	// }
 	
 	/**
 	 * Awaitable of _at least_ the lifetime of the producer containing the values emitted since call.
@@ -60,7 +307,7 @@ class Producer<+T> extends EmitIterator<T> {
 	 * @return - Emit transformed items from this Producer.
 	 */
 	public function map<Tv>((function(T): Tv) $f): Producer<Tv> {
-		return new self(async {
+		return static::create_producer(async {
 			foreach(clone $this await as $v)
 				yield $f($v);
 		});
@@ -77,7 +324,7 @@ class Producer<+T> extends EmitIterator<T> {
 	 */
 	public function scan<Tv super T>((function(T, T): Tv) $f): Producer<Tv> {
 		$last = null;
-		return new static(async {
+		return static::create_producer(async {
 			foreach(clone $this await as $v) {
 				if(!is_null($last))
 					yield $f($last, $v);
@@ -147,8 +394,7 @@ class Producer<+T> extends EmitIterator<T> {
 	 */
 	public function flat_map<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
-		return new static(new EmitIterator(
-			($appender) ==> Vector{
+		return new self(($appender) ==> Vector{
 				new DelayedEmptyAsyncIterator(async {
 					foreach($clone await as $seed) {
 						$subclone = clone $meta($seed);
@@ -156,7 +402,7 @@ class Producer<+T> extends EmitIterator<T> {
 					}
 				})
 			}
-		));
+		);
 	}
 	/**
 	 * [Convert an Observable that emits Observables into a single Observable that emits the items emitted by the most-recently-emitted of those Observables](http://reactivex.io/documentation/operators/switch.html)
@@ -173,7 +419,7 @@ class Producer<+T> extends EmitIterator<T> {
 	 */
 	public function switch_on_next<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
-		return new static(new EmitIterator(
+		return new static(
 			($appender) ==> Vector{
 				new DelayedEmptyAsyncIterator(async {
 					$current_idx = new Wrapper(-1);
@@ -190,7 +436,7 @@ class Producer<+T> extends EmitIterator<T> {
 					}
 				})
 			}
-		));
+		);
 	}
 	/**
 	 * [Divide an Observable into a set of Observables that each emit a different subset of items from the original Observable.](http://reactivex.io/documentation/operators/groupby.html)
@@ -207,14 +453,14 @@ class Producer<+T> extends EmitIterator<T> {
 	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
 		$clone = clone $this;
 		$handles = Map{};
-		return new static(async {
+		return static::create_producer(async {
 			foreach($clone await as $v) {
 				$key = $keysmith($v);
 				if(!$handles->containsKey($key)) {
 					// add emittee
 					$handles->set($key, ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ $clone }, Vector{ \HH\Asio\later() })->getWaitHandle())); // later() for just in case iterator has finished: we don't want the ConditionWaitHandle to throw.
 					$handles[$key]->succeed($v);
-					yield new static(async {
+					yield static::create(async {
 						try {
 							$v = await $handles[$key];
 							$handles[$key] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ $clone })->getWaitHandle());
@@ -244,7 +490,7 @@ class Producer<+T> extends EmitIterator<T> {
 	 * @return - Produce Collections (which may be empty) bundling values emitted during each buffering period, as dictated by `$signal`.
 	 */
 	public function buffer(Producer<mixed> $signal): Producer<\ConstVector<T>> {
-		return new self(async {
+		return static::create_producer(async {
 			$clone = clone $this;
 			foreach(clone $signal await as $_)
 				yield new Vector($clone->fast_forward());
@@ -264,7 +510,7 @@ class Producer<+T> extends EmitIterator<T> {
 	public function debounce(int $usecs): this {
 		$clone = clone $this;
 		$extendable = new Wrapper(new Extendable($clone->next()));
-		return new static(new EmitIterator(($appender) ==> Vector {
+		return new static(($appender) ==> Vector{
 			async {
 				$first_vec = await $extendable->get();
 				$k_v = $first_vec->lastValue();
@@ -286,7 +532,7 @@ class Producer<+T> extends EmitIterator<T> {
 						yield $last[1];
 				}
 			}
-		}));
+		});
 	}
 	
 	/**
@@ -299,15 +545,15 @@ class Producer<+T> extends EmitIterator<T> {
 	 */
 	public function window(Producer<mixed> $signal): Producer<this> {
 		$clone = clone $this;
-		return new static(async {
+		return static::create_producer(async {
 			while(!$signal->is_finished() && !$clone->is_finished()) {
-				$window = new EmitIterator(
+				$window = new static(
 					($_) ==> Vector{ $clone },
 					(Iterable<Awaitable<mixed>> $total) ==>
 						Producer::from_nonblocking($total->concat(Vector{ $signal->next() }))
 				              ->first() // race the next signal tick and the bulk emitter total
          	);
-         	yield new static($window);
+         	yield $window;
          	await $window->get_lifetime();
 			}
 		});
@@ -321,7 +567,7 @@ class Producer<+T> extends EmitIterator<T> {
 	 * @return - Produce the last value emitted during a window dictated by `$signal`.
 	 */
 	public function sample(Producer<mixed> $signal): Producer<?T> {
-		return new static(async {
+		return static::create_producer(async {
 			foreach($this->window($signal) await as $producer) {
 				$v = await $producer->last();
 				yield $v;
@@ -330,10 +576,10 @@ class Producer<+T> extends EmitIterator<T> {
 	}
 	
 	public final static function defer((function(): Producer<T>) $factory): this {
-		return new static(new DeferredProducer($factory));
+		return static::create(new DeferredProducer($factory));
 	}
 	public static function empty(): this {
-		return new static(new EmptyAsyncIterator());
+		return static::create(new EmptyAsyncIterator());
 	}
 	public static function throw(\Exception $e): this {
 		return new static(async {
@@ -341,7 +587,7 @@ class Producer<+T> extends EmitIterator<T> {
 		});
 	}
 	public static function interval(int $usecs): Producer<int> {
-		return new static(async {
+		return static::create_producer(async {
 			for($i = 0; ; $i++) {
 				await \HH\Asio\usleep($usecs);
 				yield $i;
@@ -349,40 +595,40 @@ class Producer<+T> extends EmitIterator<T> {
 		});
 	}
 	public static final function just(T $v): this {
-		return new static(async {
+		return static::create(async {
 			yield $v;
 		});
 	}
 	public static function range(int $n, int $m): Producer<int> {
-		return new static(async {
+		return static::create_producer(async {
 			for(; $n < $m; $n++)
 				yield $n;
 		});
 	}
 	public static final function repeat(T $v, ?int $n = null): this {
-		return new static(async {
+		return static::create(async {
 			for(; is_null($n) || $n > 0; !is_null($n) && $n--)
 				yield $v;
 		});
 	}
 	public static final function repeat_sequence(Traversable<T> $vs, ?int $n = null): this {
-		return new static(async {
+		return static::create(async {
 			for(; is_null($n) || $n > 0; !is_null($n) && $n--)
 				foreach($vs as $v)
 					yield $v;
 		});
 	}
 	public final static function timer(T $v, int $delay): this {
-		return new static(async {
+		return static::create(async {
 			await \HH\Asio\usleep($delay);
 			yield $v;
 		});
 	}
 	public static final function from_nonblocking(Iterable<Awaitable<T>> $subawaitables): this {
-		return new static(EmitIterator::create_from_awaitables($subawaitables));
+		return static::create(static::create_from_awaitables($subawaitables));
 	}
 	public final static function from(Iterable<Awaitable<T>> $subawaitables): this {
-		return new static(async {
+		return static::create(async {
 			foreach($subawaitables as $v) {
 				$v = await $v;
 				yield $v;
@@ -390,7 +636,7 @@ class Producer<+T> extends EmitIterator<T> {
 		});
 	}
 	public final static function merge(Iterable<AsyncIterator<T>> $producers): this {
-		return new static(new EmitIterator(($_) ==> $producers));
+		return new static(($_) ==> $producers);
 	}
 	/**
 	 * [Combine the emissions of multiple Observables together via a specified function and emit single items for each combination based on the results of this function.](http://reactivex.io/documentation/operators/zip.html)
@@ -399,7 +645,7 @@ class Producer<+T> extends EmitIterator<T> {
 	 * @param $combiner - Zips left- and right-hand items to `Tx`-valued items.
 	 */
 	public static function zip<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu, Tv): Tx) $combiner): Producer<Tx> {
-		return new self(async {
+		return static::create_producer(async {
 			while(true) {
 				// requires HHVM ^3.16
 				list($u, $v) = await \HH\Asio\va($A->next(), $B->next());
@@ -412,7 +658,7 @@ class Producer<+T> extends EmitIterator<T> {
 	}
 	public static function combine_latest<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu, Tv): Tx) $combiner): Producer<Tx> {
 		$latest = tuple(null, null);
-		return new self(new EmitIterator(($_) ==> Vector{
+		return new static(($_) ==> Vector{
 			async {
 				foreach(clone $A await as $v) {
 					$latest[0] = $v;
@@ -428,13 +674,13 @@ class Producer<+T> extends EmitIterator<T> {
 						yield $combiner($u, $v);
 				}
 			}
-		}));
+		});
 	}
 	public static function join<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu): Awaitable<mixed>) $A_timer, (function(Tv): Awaitable<mixed>) $B_timer, (function(Tu, Tv): Tx) $combiner): Producer<Tx> {
 		// ..gggghhhhhaaah...
 		$latest_timer = tuple(async {}, async {});
 		$latest = tuple(null, null);
-		return new static(new EmitIterator(
+		return new static(
 			($appender) ==> Vector{ 
 				async {
 					foreach(clone $A await as $u) {
@@ -459,7 +705,7 @@ class Producer<+T> extends EmitIterator<T> {
 					}
 				}
 			}
-		));
+		);
 	}
 	
 	private static async function _delay_return<Tv>(int $usecs, Tv $v): Awaitable<Tv> {
