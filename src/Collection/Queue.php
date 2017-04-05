@@ -7,6 +7,8 @@ class Queue<T> extends AppendOnlyQueue<T> { // extends WeakArtificialKeyedIterab
 		if(is_null($head))
 			throw new \RuntimeException('Tried to `shift` an empty `LinkedList`.');
 		$next = $head->next();
+		if($this->_empty && is_null($next))
+			throw new \RuntimeException('Tried to `shift` an empty `LinkedList`.');
 		
 		if(!$this->_started) {
 			// we could clone the head every time, but this saves some overhead
@@ -14,17 +16,17 @@ class Queue<T> extends AppendOnlyQueue<T> { // extends WeakArtificialKeyedIterab
 			$this->head = clone $this->head;
 		}
 		
-		// if($this->_stopped && is_null($next))
-		// 	// still at end: keep returning null
-		// 	return null;
-		if(!is_null($next)) { // elseif
-			// new elements added, advance head
-			$this->head->set($next);
-			if($this->_empty)
-				// previously "empty": the next element is the one we should pop
-				$head = $next;
+		if($this->_empty) {
+			invariant(!is_null($next), 'Logical impossibility by empty check');
+			$head = $next;
+			$next = $next->next();
+			$this->head->set($head);
 		}
-		$this->_empty = is_null($head->next());
+		
+		if(!is_null($next))
+			$this->head->set($next);
+		else
+			$this->_empty = true;
 		
 		return $head->get_v();
 	}

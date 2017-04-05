@@ -1,12 +1,19 @@
 <?hh
 use \HHReactor\Collection\Producer;
 require_once __DIR__ . '/../vendor/hh_autoload.php';
-\HH\Asio\join(async {
-	foreach(Producer::merge(Vector{
-		async { yield 1; await \HH\Asio\later(); yield 2; },
-		async {
-			await \HH\Asio\later(); yield 3; yield 4;
-		}}) await as $v) {
-		// var_dump($v);
+$producer = Producer::create(async {
+	for($i = 0; $i < 10; $i++) {
+		await \HH\Asio\later();
+		yield $i;
+		// var_dump($i);
 	}
+})
+            ->group_by((int $v) ==> intval($v > 4))
+            ->map(($P) ==> $P->last());
+\HH\Asio\join(async {
+	$V = await $producer->collapse();
+	$V = await \HH\Asio\v($V);
+	var_dump($V);
 });
+/* 
+*/

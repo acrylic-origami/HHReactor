@@ -6,6 +6,7 @@ use HHReactor\Asio\{
 	DelayedEmptyAsyncIterator,
 	Extendable
 };
+use function HHReactor\Asio\voidify;
 use HHReactor\Wrapper;
 
 <<__ConsistentConstruct>>
@@ -28,7 +29,7 @@ use HHReactor\Wrapper;
  */
 class Producer<+T> implements AsyncIterator<T> {
 	
-	private ConditionWaitHandle<mixed> $bell;
+	private Wrapper<ConditionWaitHandle<mixed>> $bell;
 	private Extendable<mixed> $total_awaitable;
 	private Iterable<Haltable<mixed>> $emitters = Vector{}; // Vector<Awaitable<T>> perhaps?
 	private Queue<T> $lag;
@@ -51,14 +52,26 @@ class Producer<+T> implements AsyncIterator<T> {
 		$appender = ($v) ==> $this->_append($v);
 		$this->total_awaitable = new Extendable(async {
 			// cannot assume $emitter stops emitting when the object reference is destroyed at the end of this async block: see self::_awaitify implementation
-			await \HH\Asio\later(); // guarantee bell is set
-			await $reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter)));
-			// ring bell idempotently
-			if(!$this->bell->isFinished())
-				$this->bell->succeed(null);
+			try {
+				await \HH\Asio\later(); // guarantee bell is set
+				await $reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter)));
+				// ring bell idempotently, have the final say
+				while($this->bell->get()->isFinished() && !$this->bell->get()->isFailed())
+					await \HH\Asio\later();
+				
+				if(!$this->bell->get()->isFinished())
+					$this->bell->get()->succeed(null);
+			}
+			catch(\Exception $e) {
+				while($this->bell->get()->isFinished() && !$this->bell->get()->isFailed())
+					await \HH\Asio\later();
+				
+				if(!$this->bell->get()->isFinished())
+					$this->bell->get()->fail($e);
+			}
 		});
-		$src = \HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle());
-		$this->bell = ConditionWaitHandle::create($src);
+		$src = voidify($this->total_awaitable->getWaitHandle());
+		$this->bell = new Wrapper(ConditionWaitHandle::create($src));
 		// foreach($this->iterators as $iterator) {
 		// 	$this->_pop_ready_wait_items($iterator);
 		// }
@@ -78,7 +91,7 @@ class Producer<+T> implements AsyncIterator<T> {
 			$concrete_next = $next->getWaitHandle()->result();
 			if(!is_null($concrete_next)) {
 				$this->lag->add($concrete_next[1]);
-				printf('A%d', $concrete_next[1]);
+				// printf('A%d', $concrete_next[1]);
 			}
 			else
 				return;
@@ -127,12 +140,9 @@ class Producer<+T> implements AsyncIterator<T> {
 	 */
 	private function _emit(T $v): void {
 		// ring bell idempotently
-		if(!$this->bell->isFinished())
-			$this->bell->succeed(null);
-		/* HH_FIXME[4110] */
-		$this->lag->add($v.'a');
-		
-		var_dump($this->lag->toVector());
+		if(!$this->bell->get()->isFinished())
+			$this->bell->get()->succeed($v);
+		$this->lag->add($v);
 	}
 	
 	/**
@@ -156,23 +166,26 @@ class Producer<+T> implements AsyncIterator<T> {
 	 * - **Spec**
 	 *   - Any number of elements may be queued and returned in ready-wait fashion; that is, without returning control to the top level during iteration with `await as`, even if they are not produced in ready-wait fashion.
 	 */
+	/* HH_IGNORE_ERROR[4110] The path with $this->total_awaitable as failed looks to be void, but invoking $this->total_awaitable->getWaitHandle()->result(); throws the Exception. */
 	public async function next(): Awaitable<?(mixed, T)> {
 		if($this->lag->is_empty()) {
-			if($this->bell->isFinished())
+			if($this->bell->get()->isFinished()) {
 				// idempotent reset
-				if(!$this->total_awaitable->getWaitHandle()->isFinished())
-					$this->bell = ConditionWaitHandle::create(\HHReactor\Asio\voidify($this->total_awaitable->getWaitHandle()));
+				if($this->total_awaitable->getWaitHandle()->isFailed())
+					$this->total_awaitable->getWaitHandle()->result(); // rethrow exception
+				elseif(!$this->total_awaitable->getWaitHandle()->isFinished())
+					$this->bell->set(ConditionWaitHandle::create(voidify($this->total_awaitable->getWaitHandle())));
 				else
 					return null;
+			}
 			
-			await $this->bell;
+			$bell = $this->bell->get();
+			$v = await $bell;
 		}
-		if(!$this->lag->is_empty()) {
-			// hphpd_break();
-			$v = $this->lag->shift();
-			var_dump($v);
-			return tuple(null, $v);
-		}
+		if(!$this->lag->is_empty())
+			return tuple(null, $this->lag->shift());
+		elseif($this->total_awaitable->getWaitHandle()->isFailed())
+			$this->total_awaitable->getWaitHandle()->result(); // rethrow exception
 		else
 			return null;
 	}
@@ -229,9 +242,8 @@ class Producer<+T> implements AsyncIterator<T> {
 		
 		$this->total_awaitable->soft_halt($e);
 		
-		// ring bell idempotently
-		if(!$this->bell->isFinished())
-			$this->bell->succeed(null);
+		if(!$this->bell->get()->isFinished())
+			$this->bell->get()->succeed(null);
 	}
 	
 	// public static function create_from_iterator<Tv>(AsyncIterator<Tv> $iterator): EmitIterator<Tv> {
@@ -452,28 +464,40 @@ class Producer<+T> implements AsyncIterator<T> {
 	 */
 	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
 		$clone = clone $this;
-		$handles = Map{};
-		return static::create_producer(async {
+		$subjects = Map{}; // Map<Tk, (ConditionWaitHandle<mixed>, SplQueue<T>)>
+		return self::create_producer(async {
 			foreach($clone await as $v) {
 				$key = $keysmith($v);
-				if(!$handles->containsKey($key)) {
+				if(!$subjects->containsKey($key)) {
 					// add emittee
-					$handles->set($key, ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ $clone }, Vector{ \HH\Asio\later() })->getWaitHandle())); // later() for just in case iterator has finished: we don't want the ConditionWaitHandle to throw.
-					$handles[$key]->succeed($v);
+					$subjects->set($key, tuple(
+						ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $clone }, Vector{ \HH\Asio\later() })->getWaitHandle()),
+						new \SplQueue()
+					)); // later() for just in case iterator has finished: we don't want the ConditionWaitHandle to throw.
+					$subjects[$key][1]->enqueue($v);
+					$subjects[$key][0]->succeed($v);
 					yield static::create(async {
-						try {
-							$v = await $handles[$key];
-							$handles[$key] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ $clone })->getWaitHandle());
-							yield $v;
-						}
-						catch(\InvalidArgumentException $e) {
-							if($e->getMessage() !== 'ConditionWaitHandle not notified by child.')
-								throw $e;
+						while(true) {
+							while(!$subjects[$key][1]->isEmpty())
+								yield $subjects[$key][1]->dequeue();
+							
+							try {
+								await $subjects[$key][0];
+								$subjects[$key][0] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $clone })->getWaitHandle());
+							}
+							catch(\InvalidArgumentException $e) {
+								if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')
+									throw $e;
+								return;
+							}
 						}
 					});
 				}
-				else
-					$handles[$key]->succeed($v);
+				else {
+					$subjects[$key][1]->enqueue($v);
+					if(!$subjects[$key][0]->isFinished())
+						$subjects[$key][0]->succeed($v);
+				}
 			}
 		});
 	}

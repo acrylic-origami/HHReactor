@@ -11,8 +11,8 @@ class AsyncIteratorWrapper<+T> implements AsyncIterator<T> {
 			try {
 				if(!is_null($this->handle)) {
 					$result = $this->handle->getWaitHandle()->result();
-					if(!is_null($result))
-						printf("REFRESHED %s\n", $result[1]);
+					// if(!is_null($result))
+					// 	printf("REFRESHED %s\n", $result[1]);
 				}
 				$this->handle = $this->iterator->next();
 			}
