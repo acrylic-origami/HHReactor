@@ -25,8 +25,8 @@ class Queue<T> extends AppendOnlyQueue<T> { // extends WeakArtificialKeyedIterab
 		
 		if(!is_null($next))
 			$this->head->set($next);
-		else
-			$this->_empty = true;
+		
+		$this->_empty = is_null($next);
 		
 		return $head->get_v();
 	}

@@ -30,8 +30,9 @@ use HHReactor\Wrapper;
 class Producer<+T> implements AsyncIterator<T> {
 	
 	private Wrapper<ConditionWaitHandle<mixed>> $bell;
-	private Extendable<mixed> $total_awaitable;
-	private Iterable<Haltable<mixed>> $emitters = Vector{}; // Vector<Awaitable<T>> perhaps?
+	private Haltable<mixed> $total_awaitable;
+	private Extendable<mixed> $scheduler;
+	private Iterable<Haltable<mixed>> $emitters = Vector{};
 	private Queue<T> $lag;
 	/**
 	 * Create lifetime for the Iterator by transforming a collection of "emitters" by some reducing function.
@@ -50,7 +51,7 @@ class Producer<+T> implements AsyncIterator<T> {
 		$this->lag = new Queue();
 		
 		$appender = ($v) ==> $this->_append($v);
-		$this->total_awaitable = new Extendable(async {
+		$this->total_awaitable = new Haltable(async {
 			// cannot assume $emitter stops emitting when the object reference is destroyed at the end of this async block: see self::_awaitify implementation
 			try {
 				await \HH\Asio\later(); // guarantee bell is set
@@ -70,8 +71,8 @@ class Producer<+T> implements AsyncIterator<T> {
 					$this->bell->get()->fail($e);
 			}
 		});
-		$src = voidify($this->total_awaitable->getWaitHandle());
-		$this->bell = new Wrapper(ConditionWaitHandle::create($src));
+		$this->scheduler = new Extendable($this->total_awaitable);
+		$this->bell = new Wrapper(ConditionWaitHandle::create(voidify($this->total_awaitable->getWaitHandle())));
 		// foreach($this->iterators as $iterator) {
 		// 	$this->_pop_ready_wait_items($iterator);
 		// }
@@ -87,14 +88,16 @@ class Producer<+T> implements AsyncIterator<T> {
 	
 	private function _pop_ready_wait_items(AsyncIteratorWrapper<T> $iterator): void {
 		// weed out ready items
-		while(\HH\Asio\has_finished($next = $iterator->next())) {
+		$next = $iterator->next();
+		while($next->getWaitHandle()->isFinished()) {
 			$concrete_next = $next->getWaitHandle()->result();
-			if(!is_null($concrete_next)) {
+			
+			if(!is_null($concrete_next))
 				$this->lag->add($concrete_next[1]);
-				// printf('A%d', $concrete_next[1]);
-			}
 			else
 				return;
+			
+			$next = $iterator->next();
 		}
 	}
 	
@@ -108,7 +111,22 @@ class Producer<+T> implements AsyncIterator<T> {
 	 * @param $incoming - Emit zero or more values to be included in the original Iterator. This may certainly be an `Awaitable` wanting to be sidechained.
 	 */
 	private function _append(AsyncIterator<T> $incoming): void {
-		$this->total_awaitable->extend($this->_awaitify($incoming));
+		$this->scheduler->extend($this->_awaitify($incoming));
+	}
+	
+	/**
+	 * Add functionality to sidechain.
+	 * 
+	 * **Timing**:
+	 * - Depends heavily on {@see HHReactor\Asio\Extendable::soft_extend()}
+	 * - **Spec**
+	 *   - The incoming `Awaitable` may not be `await`ed on the next arc -- any number of arcs may enter the ready queue beforehand. However, it must be `await`ed eventually.
+	 * 
+	 * **Sharing**: Unisolated. Adding to the sidechain of one EmitIterator adds to the sidechain (and hence lifetimes) of all EmitIterators derived from it.
+	 * @param $incoming - `Awaitable` to add to the sidechain
+	 */
+	public function schedule(Awaitable<mixed> $incoming): void {
+		$this->scheduler->extend($incoming);
 	}
 	
 	/**
@@ -118,6 +136,7 @@ class Producer<+T> implements AsyncIterator<T> {
 		$wrapped = new AsyncIteratorWrapper($incoming);
 		$this->_pop_ready_wait_items($wrapped);
 		foreach($wrapped await as $v) {
+			// var_dump($v);
 			if($this->total_awaitable->is_halted())
 				// stop emitting items immediately if this EmitIterator has been halted
 				// the GC might not be fast enough to 
@@ -146,34 +165,20 @@ class Producer<+T> implements AsyncIterator<T> {
 	}
 	
 	/**
-	 * Add functionality to sidechain.
-	 * 
-	 * **Timing**:
-	 * - Depends heavily on {@see HHReactor\Asio\Extendable::soft_extend()}
-	 * - **Spec**
-	 *   - The incoming `Awaitable` may not be `await`ed on the next arc -- any number of arcs may enter the ready queue beforehand. However, it must be `await`ed eventually.
-	 * 
-	 * **Sharing**: Unisolated. Adding to the sidechain of one EmitIterator adds to the sidechain (and hence lifetimes) of all EmitIterators derived from it.
-	 * @param $incoming - `Awaitable` to add to the sidechain
-	 */
-	public function schedule(Awaitable<mixed> $incoming): void {
-		$this->total_awaitable->extend($incoming);
-	}
-	/**
 	 * Create an `Awaitable` representing the next element at time of call.
 	 * 
 	 * **Timing**:
 	 * - **Spec**
 	 *   - Any number of elements may be queued and returned in ready-wait fashion; that is, without returning control to the top level during iteration with `await as`, even if they are not produced in ready-wait fashion.
 	 */
-	/* HH_IGNORE_ERROR[4110] The path with $this->total_awaitable as failed looks to be void, but invoking $this->total_awaitable->getWaitHandle()->result(); throws the Exception. */
 	public async function next(): Awaitable<?(mixed, T)> {
 		if($this->lag->is_empty()) {
 			if($this->bell->get()->isFinished()) {
 				// idempotent reset
-				if($this->total_awaitable->getWaitHandle()->isFailed())
-					$this->total_awaitable->getWaitHandle()->result(); // rethrow exception
-				elseif(!$this->total_awaitable->getWaitHandle()->isFinished())
+				$failed = $this->total_awaitable->get_dependencies()->failed();
+				if(count($failed) > 0)
+					throw $failed[0]; // rethrow exception
+				elseif(!$this->total_awaitable->get_dependencies()->all_finished())
 					$this->bell->set(ConditionWaitHandle::create(voidify($this->total_awaitable->getWaitHandle())));
 				else
 					return null;
@@ -182,12 +187,17 @@ class Producer<+T> implements AsyncIterator<T> {
 			$bell = $this->bell->get();
 			$v = await $bell;
 		}
-		if(!$this->lag->is_empty())
-			return tuple(null, $this->lag->shift());
-		elseif($this->total_awaitable->getWaitHandle()->isFailed())
-			$this->total_awaitable->getWaitHandle()->result(); // rethrow exception
-		else
-			return null;
+		if(!$this->lag->is_empty()) {
+			$v = $this->lag->shift();
+			return tuple(null, $v);
+		}
+		else {
+			$failed = $this->total_awaitable->get_dependencies()->failed();
+			if(count($failed) > 0)
+				throw $failed[0]; // rethrow exception
+			else
+				return null;
+		}
 	}
 	
 	public function is_finished(): bool {
@@ -599,6 +609,15 @@ class Producer<+T> implements AsyncIterator<T> {
 		});
 	}
 	
+	public static function count_up(int $start = 0, int $step = 1): Producer<int> {
+		return static::create_producer(async {
+			for(;;$start += $step) {
+				yield $start;
+				await \HH\Asio\later();
+			}
+		});
+	}
+	
 	public final static function defer((function(): Producer<T>) $factory): this {
 		return static::create(new DeferredProducer($factory));
 	}
@@ -669,10 +688,12 @@ class Producer<+T> implements AsyncIterator<T> {
 	 * @param $combiner - Zips left- and right-hand items to `Tx`-valued items.
 	 */
 	public static function zip<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu, Tv): Tx) $combiner): Producer<Tx> {
+		$clone_A = clone $A;
+		$clone_B = clone $B;
 		return static::create_producer(async {
 			while(true) {
 				// requires HHVM ^3.16
-				list($u, $v) = await \HH\Asio\va($A->next(), $B->next());
+				list($u, $v) = await \HH\Asio\va($clone_A->next(), $clone_B->next());
 				if(is_null($u) || is_null($v)) //  || $u[1]['_halted'] || $v[1]['_halted']
 					break;
 				// /* HH_IGNORE_ERROR[4110] Because neither are halted, one could be null because the corresponding `Tu` or `Tv` is nullable, or neither is null. */

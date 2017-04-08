@@ -1,10 +1,11 @@
 <?hh // strict
 namespace HHReactor\Asio;
+use \HHReactor\Wrapper;
 /**
  * Emit value unless interrupted
  */
-class Haltable<+T> implements Awaitable<HaltResult<T>> {
-	private ConditionWaitHandle<HaltResult<T>> $handle;
+class Haltable<+T> implements Dependent<mixed>, Awaitable<HaltResult<T>> {
+	// private ConditionWaitHandle<HaltResult<T>> $handle;
 	/**
 	 * Set up notifier of default value. Check if provided `Awaitable` is ready-wait.
 	 * 
@@ -13,28 +14,27 @@ class Haltable<+T> implements Awaitable<HaltResult<T>> {
 	 *   - If `$awaitable` is ready-wait, then this Haltable must also be ready-wait.
 	 * @param $awaitable - Resolve to default value this Haltable will mirror if not halted.
 	 */
-	public function __construct(private Awaitable<T> $awaitable) {
+	private ConditionWaitHandle<HaltResult<T>> $handle;
+	private Dependencies<mixed> $dependencies;
+	public function __construct(Awaitable<T> $dependency) {
+		$this->dependencies = new Dependencies();
 		$this->handle = ConditionWaitHandle::create(\HH\Asio\later()->getWaitHandle());
 		$notifier = async {
 			try {
-				$v = await $this->awaitable;
+				$v = await $this->dependencies->depend($dependency);
 				$handle = $this->handle;
 				if(!$handle->isFinished())
 					// if we weren't beat to the punch by a `halt` call
 					$handle->succeed(shape('_halted' => false, 'result' => $v));
 			}
 			catch(\Exception $e) {
-				if(!$this->handle->isFinished())
-					$this->handle->fail($e); // emit the exception if anyone's listening
+				$handle = $this->handle;
+				if(!$handle->isFinished())
+					$handle->fail($e); // emit the exception if anyone's listening
 			}
 		};
-		if(!$awaitable->getWaitHandle()->isFinished()) {
+		if(!$notifier->getWaitHandle()->isFinished())
 			$this->handle = ConditionWaitHandle::create($notifier->getWaitHandle());
-		}
-	}
-	
-	public function getWaitHandle(): WaitHandle<HaltResult<T>> {
-		return $this->handle;
 	}
 	
 	// <<__Deprecated('Misleading behavior: when used with the intention of resetting, there is no guarantee the reset operation will happen immediately after halting, despite immediately returning control.')>>
@@ -43,6 +43,14 @@ class Haltable<+T> implements Awaitable<HaltResult<T>> {
 	// 	$this->soft_halt($e);
 	// 	await \HH\Asio\later();
 	// }
+	
+	public function getWaitHandle(): WaitHandle<HaltResult<T>> {
+		return $this->handle;
+	}
+	
+	public function get_dependencies(): ConstDependencies<mixed> {
+		return $this->dependencies;
+	}
 	
 	/**
 	 * Check if the Haltable was halted to a finish.

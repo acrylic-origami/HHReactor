@@ -5,16 +5,17 @@ use HHReactor\Collection\Producer;
 /**
  * Allow T-typed `Awaitable`s to be added from any scope at any time, and eventually resolve to a time-ordered Vector of their results.
  */
-class Extendable<T> implements Awaitable<Vector<T>> {
-	private Vector<Awaitable<T>> $subawaitables = Vector{};
+class Extendable<T> implements Dependent<T>, Awaitable<\ConstMap<string, T>> {
+	private Haltable<Vector<T>> $total_awaitable;
 	/**
 	 * @var - `await`ed and recycled to push new Awaitables onto the scheduler.
 	 */
-	private Haltable<Vector<T>> $total_awaitable;
 	private Haltable<mixed> $partial;
-	public function __construct(Awaitable<T> $initial) {
-		$this->partial = new Haltable($initial);
-		$this->subawaitables = Vector{ $initial };
+	private Dependencies<T> $dependencies;
+	public function __construct(Awaitable<T> $dependency) {
+		$this->dependencies = new Dependencies();
+		
+		$this->partial = new Haltable($this->dependencies->depend($dependency));
 		/* HH_IGNORE_ERROR[4110] $v['result'] is always type T (which may or may not be nullable) because !_halted */
 		$this->total_awaitable = new Haltable(async {
 			do {
@@ -23,12 +24,39 @@ class Extendable<T> implements Awaitable<Vector<T>> {
 			}
 			while($v['_halted']);
 			// Assuming $this->partial is updated with \HH\Asio\v; this should be done at this point.
-			return \HH\Asio\v($this->subawaitables)->getWaitHandle()->result();
+			return \HH\Asio\v($this->dependencies->get_dependencies())->getWaitHandle()->result();
 		});
 	}
 	
 	public function soft_halt(?\Exception $e = null): void {
 		$this->total_awaitable->soft_halt($e);
+	}
+	
+	public function is_halted(): bool {
+		return $this->total_awaitable->is_halted();
+	}
+	
+	public function getWaitHandle(): WaitHandle<\ConstMap<string, T>> {
+		return $this->_getWaitHandle()->getWaitHandle();
+	}
+	
+	public function get_dependencies(): ConstDependencies<T> {
+		return $this->dependencies;
+	}
+	
+	<<__Memoize>>
+	private async function _getWaitHandle(): Awaitable<\ConstMap<string, T>> {
+		$halt_result = await $this->total_awaitable;
+		if($halt_result['_halted']) {
+			// retrieve completed items
+			return $this->dependencies->get_dependencies()
+			                          ->filter(($subawaitable) ==> $subawaitable->getWaitHandle()->isFinished())
+			                          ->map(($subawaitable) ==> $subawaitable->getWaitHandle()->result());
+		}
+		else {
+			/* HH_IGNORE_ERROR[4110] $halt_result['result'] is always type T (which may or may not be nullable) because !_halted */
+			return $halt_result['result'];
+		}
 	}
 	
 	/**
@@ -42,36 +70,15 @@ class Extendable<T> implements Awaitable<Vector<T>> {
 	 *   - Must not cause a cyclic dependency when `await`ing `$this`.
 	 */
 	public function extend(Awaitable<T> $incoming): void {
-		if(\HH\Asio\has_finished($this->total_awaitable))
+		if($this->total_awaitable->getWaitHandle()->isFinished())
 			throw new \RuntimeException('Attempted to extend a finished Extendable.');
 		
 		if(!$this->partial->getWaitHandle()->isFinished())
 			// sketchy but possible: partial is provably finished before total_awaitable and the calling scope wants to extend with something else
 			$this->partial->soft_halt();
 		
-		$this->subawaitables->add($incoming);
-		$this->partial = new Haltable(\HH\Asio\v($this->subawaitables));
-	}
-	
-	public function getWaitHandle(): WaitHandle<Vector<T>> {
-		return $this->_getWaitHandle()->getWaitHandle();
-	}
-	
-	public function is_halted(): bool {
-		return $this->total_awaitable->is_halted();
-	}
-	
-	private async function _getWaitHandle(): Awaitable<Vector<T>> {
-		$halt_result = await $this->total_awaitable; // propagates exception automatically
-		// assume no exception by Haltable herein
-		if($halt_result['_halted']) {
-			// retrieve completed items
-			return $this->subawaitables->filter(($subawaitable) ==> $subawaitable->getWaitHandle()->isFinished())
-			                           ->map(($subawaitable) ==> $subawaitable->getWaitHandle()->result());
-		}
-		else {
-			/* HH_IGNORE_ERROR[4110] $halt_result['result'] is always type T (which may or may not be nullable) because !_halted */
-			return $halt_result['result'];
-		}
+		/* HH_IGNORE_ERROR[4015] `depend` is an identity function with a side effect */
+		$this->dependencies->depend($incoming);
+		$this->partial = new Haltable(\HH\Asio\v($this->dependencies->get_dependencies()));
 	}
 }
