@@ -24,7 +24,7 @@ class Extendable<T> implements Dependent<T>, Awaitable<\ConstMap<string, T>> {
 			}
 			while($v['_halted']);
 			// Assuming $this->partial is updated with \HH\Asio\v; this should be done at this point.
-			return \HH\Asio\v($this->dependencies->get_dependencies())->getWaitHandle()->result();
+			return \HH\Asio\m($this->dependencies->get_dependencies())->getWaitHandle()->result();
 		});
 	}
 	
@@ -79,6 +79,6 @@ class Extendable<T> implements Dependent<T>, Awaitable<\ConstMap<string, T>> {
 		
 		/* HH_IGNORE_ERROR[4015] `depend` is an identity function with a side effect */
 		$this->dependencies->depend($incoming);
-		$this->partial = new Haltable(\HH\Asio\v($this->dependencies->get_dependencies()));
+		$this->partial = new Haltable(\HH\Asio\m($this->dependencies->get_dependencies()));
 	}
 }

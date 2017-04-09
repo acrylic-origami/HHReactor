@@ -51,11 +51,12 @@ class Producer<+T> implements AsyncIterator<T> {
 		$this->lag = new Queue();
 		
 		$appender = ($v) ==> $this->_append($v);
+		$this->scheduler = new Extendable($reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter))));
 		$this->total_awaitable = new Haltable(async {
 			// cannot assume $emitter stops emitting when the object reference is destroyed at the end of this async block: see self::_awaitify implementation
 			try {
+				await $this->scheduler;
 				await \HH\Asio\later(); // guarantee bell is set
-				await $reducer($emitter_factory($appender)->map(($emitter) ==> $this->_awaitify($emitter)));
 				// ring bell idempotently, have the final say
 				while($this->bell->get()->isFinished() && !$this->bell->get()->isFailed())
 					await \HH\Asio\later();
@@ -71,7 +72,6 @@ class Producer<+T> implements AsyncIterator<T> {
 					$this->bell->get()->fail($e);
 			}
 		});
-		$this->scheduler = new Extendable($this->total_awaitable);
 		$this->bell = new Wrapper(ConditionWaitHandle::create(voidify($this->total_awaitable->getWaitHandle())));
 		// foreach($this->iterators as $iterator) {
 		// 	$this->_pop_ready_wait_items($iterator);
@@ -91,7 +91,6 @@ class Producer<+T> implements AsyncIterator<T> {
 		$next = $iterator->next();
 		while($next->getWaitHandle()->isFinished()) {
 			$concrete_next = $next->getWaitHandle()->result();
-			
 			if(!is_null($concrete_next))
 				$this->lag->add($concrete_next[1]);
 			else
@@ -136,7 +135,6 @@ class Producer<+T> implements AsyncIterator<T> {
 		$wrapped = new AsyncIteratorWrapper($incoming);
 		$this->_pop_ready_wait_items($wrapped);
 		foreach($wrapped await as $v) {
-			// var_dump($v);
 			if($this->total_awaitable->is_halted())
 				// stop emitting items immediately if this EmitIterator has been halted
 				// the GC might not be fast enough to 
@@ -330,8 +328,9 @@ class Producer<+T> implements AsyncIterator<T> {
 	 */
 	public function map<Tv>((function(T): Tv) $f): Producer<Tv> {
 		return static::create_producer(async {
-			foreach(clone $this await as $v)
+			foreach(clone $this await as $v) {
 				yield $f($v);
+			}
 		});
 	}
 	/**
@@ -475,13 +474,19 @@ class Producer<+T> implements AsyncIterator<T> {
 	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
 		$clone = clone $this;
 		$subjects = Map{}; // Map<Tk, (ConditionWaitHandle<mixed>, SplQueue<T>)>
-		return self::create_producer(async {
+		$producer_wrapper = new Wrapper(null);
+		$producer_wrapper->set(self::create_producer(async {
+			await \HH\Asio\later();
+			$self_producer = $producer_wrapper->get();
+			invariant(!is_null($self_producer), 'By construction, this must by this point be set to this the producer wrapping this iterator.');
+			
 			foreach($clone await as $v) {
 				$key = $keysmith($v);
 				if(!$subjects->containsKey($key)) {
 					// add emittee
+					
 					$subjects->set($key, tuple(
-						ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $clone }, Vector{ \HH\Asio\later() })->getWaitHandle()),
+						ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $self_producer }, Vector{ \HH\Asio\later() })->getWaitHandle()),
 						new \SplQueue()
 					)); // later() for just in case iterator has finished: we don't want the ConditionWaitHandle to throw.
 					$subjects[$key][1]->enqueue($v);
@@ -493,7 +498,8 @@ class Producer<+T> implements AsyncIterator<T> {
 							
 							try {
 								await $subjects[$key][0];
-								$subjects[$key][0] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $clone })->getWaitHandle());
+								$wh = \HHReactor\Asio\lifetime(Vector{ clone $self_producer })->getWaitHandle();
+								$subjects[$key][0] = ConditionWaitHandle::create($wh);
 							}
 							catch(\InvalidArgumentException $e) {
 								if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')
@@ -509,7 +515,10 @@ class Producer<+T> implements AsyncIterator<T> {
 						$subjects[$key][0]->succeed($v);
 				}
 			}
-		});
+		}));
+		$producer = $producer_wrapper->get();
+		invariant(!is_null($producer), 'Producer is unconditionally set just above.');
+		return $producer;
 	}
 	/**
 	 * [Periodically gather items emitted by an Observable into bundles and emit these bundles rather than emitting the items one at a time.](http://reactivex.io/documentation/operators/buffer.html)
