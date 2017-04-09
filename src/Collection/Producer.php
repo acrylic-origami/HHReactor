@@ -333,6 +333,16 @@ class Producer<+T> implements AsyncIterator<T> {
 			}
 		});
 	}
+	
+	public function filter<Tv>((function(T): bool) $f): Producer<T> {
+		return static::create_producer(async {
+			foreach(clone $this await as $v)
+				if($f($v))
+					yield $v;
+		});
+	}
+	
+	
 	/**
 	 * [Apply a function to each item emitted by [a Producer], sequentially, and emit each successive value](http://reactivex.io/documentation/operators/scan.html)
 	 * 
@@ -480,6 +490,7 @@ class Producer<+T> implements AsyncIterator<T> {
 			$self_producer = $producer_wrapper->get();
 			invariant(!is_null($self_producer), 'By construction, this must by this point be set to this the producer wrapping this iterator.');
 			
+			// note: fail the trunk producer if this $clone value producer fails.
 			foreach($clone await as $v) {
 				$key = $keysmith($v);
 				if(!$subjects->containsKey($key)) {
@@ -498,8 +509,7 @@ class Producer<+T> implements AsyncIterator<T> {
 							
 							try {
 								await $subjects[$key][0];
-								$wh = \HHReactor\Asio\lifetime(Vector{ clone $self_producer })->getWaitHandle();
-								$subjects[$key][0] = ConditionWaitHandle::create($wh);
+								$subjects[$key][0] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $self_producer })->getWaitHandle());
 							}
 							catch(\InvalidArgumentException $e) {
 								if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')

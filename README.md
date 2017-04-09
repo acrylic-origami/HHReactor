@@ -1,150 +1,52 @@
-# HHRx
+## HHReactor
 
-HHRx implements Reactive extensions in **pure strict Hack**, using solely `Awaitable` and wait handles to orchestrate concurrent streams and manage the lifetime of the application.
+HHReactor implements the ReactiveX operators that you know and love, but embraces the existing async features of Hack, and defects from the Reactive Manifesto with an I-call-you iterator-based mechanic over the you-call-me callback-based approach. There are no objects managing subscriptions, and there is no need: `Producer`s generate elements with `yield`, these elements are retrieved through `foreach-await`, errors are handled with `try-catch`, and completion logic is whatever follows the `foreach` block. The entire library behavior is concentrated in `Producer`, which provides all of the operators.
 
-(Jan 19, 2017) Development has been intently focussed on the most non-trivial operators, notably `merge` and backpressure operators like `buffer` and `until`, because the needs of their implementations speak the loudest to the implementation of the core. HHRx does not yet conform to [the Observable Contract](http://reactivex.io/documentation/contract.html), most glaringly as proper error handling is not yet implemented. It is a straightforward fix, but yields precedence to stability of streams.
+`Producer`s can be cancelled by invoking `halt` on the object. This behavior is also distinct from ReactiveX in that it stops _the Producer itself_. The more familiar and weaker behavior &mdash; to stop receiving values &mdash; is a simple matter of `break;` in HHReactor (over `Subscription::cancel()` in ReactiveX).
 
-## Usage
+Single-valued operators &mdash; aggregate operators like `reduce` or filters like `last` &mdash; also have the convenience and expressive power of being `Awaitable`s over `AsyncIterator`s, so their values are usable immediately in proceeding code.
 
-### By example
+### Usage
 
-```hack
-<?hh // partial
-require_once(__DIR__ . '/../vendor/hh_autoload.php');
-async function f<T>(T $v): AsyncIterator<T> {
-	await HH\Asio\later();
-	yield $v;
-}
-$factory = new HHRx\StreamFactory();
-$streams = Vector{ $factory->make(f(1)), $factory->make(f(2)) };
-// NOTE the factory performing the merge
-$river = $factory->merge($streams);
+First, a PSA: **clone `Producer`s before iterating.** That is, `Producer`s must be one-to-one with consumers.
 
-$streams->mapWithKey((int $k, HHRx\Stream $stream) ==> {
-	// NOTE the async handler, which is that 
-	// way for generality (and for some 
-	// internal behavior).
-	$stream->subscribe(async (int $v) ==> {
-		printf("Stream %d: %d\n", $k, $v);
-	});
-	$stream->onEnd(async () ==> {
-		printf("Stream %d: END\n", $k);
-	});
-});
+`Producer`s wrap `AsyncIterator`s at their core. These iterators may be out of sync with the consumers of a `Producer` by any number of elements, so each instance of `Producer` tracks its lag and catches its consumer up when it regains control. However, note that the lag is a single queue, and if many consumers try to consume a single instance of `Producer`, they race against each other to consume the lag. Multicasting a `Producer` also damages the timing of the `Producer` because of the way it is implemented (it informs its consumers lazily). These race conditions can end a `Producer` prematurely.
 
-$river->subscribe(async (int $v) ==> {
-	printf("River: %d\n", $v);
-});
-$river->onEnd(async () ==> {
-	echo "RIVER: END\n";
-});
+<sup>Nasty bugs during development have come from operators not cloning the incoming producers. If you see something along the lines of `foreach($this await as ...)` over `foreach(clone $this await as ...)`, please kindly report it in an issue.</sup>
 
-// Kick off the application
-\HH\Asio\join($factory->get_total_awaitable());
-```
+#### Example
 
-### By component
-
-I will use the term "end-safe" to describe some `Awaitable`s. These are **guaranteed** to resolve before the application ends. The reason is core to the implementation, and is explained in the **How it works** section.
-
-#### Stream<T>
-
-`Stream` generates values over time, broadcasting them to subscribers. _If_* they end, they broadcast values to end subscribers.
-
-At their core, they wrap `AsyncIterator`s, which do much of the heavy lifting of producing values over time. The responsibility of `Stream` by itself is managing subscribers and providing the necessary plumbing to complete before their underlying `AsyncIterator`s.
-
-**They are always hot by construction.** I am philosophically opposed to the notion of cold streams by the unnecessary and dangerous amibiguity they present. Note that in HHVM, `Iterator`s can be cloned, and the way `Stream` wraps `Iterator` affords maximum flexibility to developers to manage "cold" behavior explicitly.
-
-* Standard Rx operators:
-	* [`::map<Tv>((function(T):Tv)): Stream<Tv>`](http://reactivex.io/documentation/operators/map.html)
-	* [`::buffer(Stream<mixed>): Stream<\ConstVector<T>>`](http://reactivex.io/documentation/operators/buffer.html). Note that this `buffer` implementation uses a stream for ticking vs. a time interval.
-	* [`::using(Stream<mixed>): void`](http://reactivex.io/documentation/operators/using.html): bounds the stream to the end of another, shorter-lived stream.
-* Custom utility methods:
-	* `::await_end(): Awaitable<void>`: provides an end-safe `Awaitable` that resolves after the stream errs or ends.
-	* `::collapse(): Awaitable<\ConstVector<T>>`: buffers the whole stream. End-safe.
-	* `::end_on(Awaitable<mixed>): void`: bounds the stream to a shorter-lived `Awaitable`. Can be called multiple times.
-	* `::clone_producer(): Producer<T>`: crucial for internal operations, **not end-safe if awaited** &mdash; use `::await_end` for that purpose. **How it works** section for the curious.
-
-<sup>* Eternal streams in the HHRx environment are not impossible, but are proving to be rather unnatural. They are elaborated in the **How it works** section.</sup>
-
-#### StreamFactory
-
-`StreamFactory` takes such precedence in the usage guide because through its construction of streams, and it alone, it maintains the longest-running `Awaitable` in the application that subsequently _is_ the lifetime of the application. Therefore, all operators either act in conjunction with or are implemented by an instance of the factory.
-
-* The factory operation is `StreamFactory::make<T>(AsyncIterator<T>): Stream<T>`.
-	* A separate factory operation, `::bounded_make(AsyncIterator<T>): Stream<T>` is provided to make a stream bounded by the application lifetime out of a long- or infinite-running `AsyncIterator`.
-* Standard Rx operators:
-	* [`::merge<T>(Iterable<Stream<T>>): Stream<T>`](http://reactivex.io/documentation/operators/merge.html)
-	* [`::concat<T>(Iterable<Awaitable<T>>): Stream<T>`](http://reactivex.io/documentation/operators/concat.html)
-	* [`::just<T>(Awaitable<T>): Stream<T>`](http://reactivex.io/documentation/operators/just.html)
-	* [`::from<T>(Iterable<Awaitable<T>>): Stream<T>`](http://reactivex.io/documentation/operators/from.html)
-
-#### Streamlined<T>
-
-`Streamlined` is an interface for `Stream` wrappers that provide functionality outside of the `Stream` they wrap. It exposes this undercurrent with `get_local_stream`.
-
-An example would be a reactive database (you bet this is coming soon!), that maintains a read data stream, alongside any number of utility functions we'd expect.
-
-## How it works
-
-### Some nuances about the Hack await-async implementation
-
-Await-async is a [cooperative-multitasking model](http://hhvm.com/blog/7091/async-cooperative-multitasking-for-hack). As a result, synchronous code running between `await` statements _cannot_ be interrupted by `Awaitable`s resolving. Only when control returns to a `join` call is the queue of resolved `Awaitable`s processed.
-
-Some `Awaitable`s that complete right away do not yield control to the calling scope when `await`ed. For example, there is no ambiguity to the order the following prints:
+The example below also shows off `count_up()` &mdash; an infinite generator of ints &mdash; and `collapse()` &mdash; which transforms the `Producer` to an `Awaitable`.
 
 ```hack
-<?hh // partial
-HH\Asio\join(HH\Asio\v(Vector{
-	async {
-		await async{}; // it's as if this statement doesn't exist
-		echo 'FIRST';
-	},
-	async {
-		await \HH\Asio\usleep(1);
-		echo 'SECOND';
+<?hh
+use \HHReactor\Collection\Producer;
+$root = Producer::create(async {
+	for($i = 0; $i < 10; $i++) {
+		yield $i;
+		if(round(rand()/getrandmax()))
+			await \HH\Asio\later(); // every now and then, do some work
 	}
-}));
+});
+
+// Identify values > 4
+$gt_4 = (clone $root)->group_by((int $v) ==> intval($v > 4)); // bifurcate to two Producers by their >4-ness
+$gt_4 = Producer::zip($gt_4, Producer::count_up(), 
+	(Producer<int> $A, int $B) ==> $A->map((int $v) ==> sprintf('Is %d >4? %s', $v, $B ? 'Yes' : 'No'))) // identify the producers by their >4-ness
+            ->flat_map(($I) ==> $I); // collapse back to one producer
+
+// Get the last even value
+$last_odd = (clone $root)->filter((int $v) ==> (bool) $v % 2)
+                         ->last();
+\HH\Asio\join(async {
+	$all_gt_4 = await $gt_4->collapse(); // collapse to Vector of all generated items
+	var_dump($all_gt_4);
+	
+	$last_odd = await $last_odd; // just await the single value
+	var_dump($last_odd);
+});
 ```
 
-These are known as "ready wait-handles" &mdash; prior to `await`ing, `HH\Asio\is_finished` would report that they are already finished.
+### Sidechaining
 
-However, when multiple non-ready-wait handles resolve before control returns to `join`, it is a more interesting picture. The order that they are processed is [undefined by specification](http://stackoverflow.com/a/41650153/3925507). Since there is a large bulk of the codebase that relies on asynchronous resetting that mustn't be interrupted, enforcing some order becomes paramount.
-
-Awaiting `HH\Asio\later()` defers resolution until at least the next time `HH\Asio\join` is hit. More formally, it spawns an `Awaitable` that has the lowest priority in the default or IO scheduler, depending on which is specified. As a result, it is used mostly to return control as quickly as possible to the `join` within `async` methods (e.g. `ResettableConditionWaitHandle::_notify`, and to transform ready-wait handles to pending handles in `async` blocks (e.g. `AsyncPoll::producer`).
-
-[Tip: read the `TotalAwaitable` documentation first.] The other crucial consequence is that any `Awaitable` that is not added to the `TotalAwaitable` _might not resolve_, even if it depends on the exact same `Awaitable`s as the application `TotalAwaitable`. This is because, if both are queued in the scheduler and the `TotalAwaitable` resolves first, the application exits before this `Awaitable` resolves. This is why some `Awaitable`s are end-safe, and some aren't.
-
-_[This section is incomplete. Watch for more details!]_
-
-### Helper classes
-
-#### AsyncPoll
-
-The most non-trivial operation by far is `merge`. The most basic operation of a merge is to emit the value that is first to resolve from a collection of `Awaitable`s. This follows directly from iteratively observing the collection of `Iterator`s for the first `next` to resolve; doing this over and over to produce the merged stream.
-
-I am eternally grateful for [@jano sharing his `AsyncPoll` implementation](https://github.com/hhvm/asio-utilities/pull/11). I elaborate on the fundamental operation in [this SO answer](http://stackoverflow.com/a/41406845/3925507). The gist is that there exists a wait handle called `ConditionWaitHandle` that wraps an upper-bounding wait handle, that crucially can be _notified by any scope_ to resolve to a certain value. This allows for a collection of `Awaitable`s to race, which enables the `merge` operation naturally.
-
-The implementation in HHRx is more minimal, mostly by merit of closures, which preserve references to the "race handle". I found the generator function to be a much cleaner home for `AsyncPoll` functionality over a class, especially when backpressure enters the picture (cf. `Producer::fast_forward` and `AsyncPoll::producer` implementation).
-
-**A caveat for those interested in the `ConditionWaitHandle` usage in HHRx**: the notifiers `succeed` and `fail` _do not_ immedately transfer control to the scopes `await`ing the `ConditionWaitHandle`. Instead, these wait handles are resolved internally, and pushed into the queue of ready wait handles to be processed when `HH\Asio\join()` is hit again. To force this to happen immediately, the notifying scope awaits `HH\Asio\later()` right after notifying.
-
-#### TotalAwaitable
-
-At any instant during the application lifetime, an asynchronous object, be it a stream or `Awaitable`, could be created with a lifetime past the immediate lifetime of the application. `TotalAwaitable` allows the application lifetime to be extended dynamically and immediately when these objects are created. In fact, _this is the object that `join`ed at the top-level to yield the application lifetime_. As a result, it must also ensure that these asynchronous objects are kicked off as soon as they are added to avoid unintentional and unwanted dependencies.
-
-#### Collection\AsyncIteratorWrapper<T>
-
-An HHVM-specific wrinkle is that `AsyncGenerator`, which comes from `async` methods that `yield` values, cannot have `next` called on it multiple times while it is still resolving, and will err with "Generator already running". Note `AsyncGenerator <: AsyncIterator`. `AsyncIteratorWrapper` multicasts `AsyncGenerator::next` by maintaining its own handle on `next` and sharing it with handlers.
-
-#### Collection\Producer<T>
-
-`Producer` as a separate, fully-fledged class arose out of the backpressure problem. When multiple `Producers` are bound to a single `AsyncIterator[Wrapper]`, each maintains a queue of the values that have been added since the last that that `Producer` emitted values.
-
-To avoid a memory leak present in the naive implementation (e.g. implementing the lagging list with a `Vector`), the HHRx `Queue` implementation marches its head to shed references to lagged nodes that have already been emitted. See `Queue::shift`.
-
-#### Collection\Haltable<T> & Collection\IHaltable<T>
-
-Many Rx operators involve bounding streams to future events. The expectation is that, the moment that future event occurs, the bounded stream will end. The most natural implementation, however, is for the last element the stream is `await`ing to finish before the stream ends, which is markedly different behavior. To stop a stream in its tracks immediately, `Haltable` is used, which allows any scope to notify an exception (for `Iterator` or elsewhere) or `null` (for `AsyncIterator`) instantly to the waiting scopes, usually `Producer`s.
-
-`ConditionWaitHandle` forms the foundation of the implementation.
+As an added feature, HHReactor extends the async-await model by providing, in Producer scopes, a scheduler to sidechain void async code. This is the one advantage that the callback mechanic has over await-async, since in the latter all\* `Awaitable`s block the current scope, even if the scope doesn't have a value dependency. \*With some careful puppeteering of `ConditionWaitHandle`, HHReactor makes it possible to set-and-forget async behavior from any scope with access to an active `Producer`.
