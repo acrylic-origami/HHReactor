@@ -15,7 +15,7 @@ $gt_4 = Producer::zip($gt_4, Producer::count_up(),
 	(Producer<int> $A, int $B) ==> $A->map((int $v) ==> sprintf('Is %d >4? %s', $v, $B ? 'Yes' : 'No'))) // identify the producers by their >4-ness
             ->flat_map(($I) ==> $I); // collapse back to one producer
 
-// Get the last even value
+// Get the last odd value
 $last_odd = (clone $root)->filter((int $v) ==> (bool) $v % 2)
                          ->last();
 \HH\Asio\join(async {
