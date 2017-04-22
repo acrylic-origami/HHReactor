@@ -10,7 +10,7 @@ function ReadFileProducer(string $f, bool $write_en = false, float $timeout = 0.
 				$line = fgets($handle);
 				yield $line;
 			}
-			while($line !== "\x04"); // is not EOF
+			while(!feof($handle));
 		}
 		while($status === STREAM_AWAIT_READY);
 	});

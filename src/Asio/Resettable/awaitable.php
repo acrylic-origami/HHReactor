@@ -19,7 +19,7 @@ function awaitable<T>((function((function(): void)): Awaitable<T>) $resetter): (
 	$dependency_wrapper->set($dependency);
 	try {
 		$condition_wrapper->set(ConditionWaitHandle::create(voidify($dependency)));
-		/* HH_IGNORE_ERROR[4110] Provably not null */
+		/* HH_IGNORE_ERROR[4110] $condition_wrapper provably does not wrap null */
 		return tuple($dependency, $condition_wrapper);
 	}
 	catch(\InvalidArgumentException $e) {

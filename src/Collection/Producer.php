@@ -1,15 +1,9 @@
 <?hh // strict
 namespace HHReactor\Collection;
-use HHReactor\Asio\{
-	Haltable,
-	HaltResult,
-	DelayedEmptyAsyncIterator,
-	Extendable,
-	Resettable
-};
+use HHReactor\Asio\DelayedEmptyAsyncIterator;
 use function HHReactor\Asio\voidify;
 use HHReactor\Wrapper;
-use HHReactor\CovWrapper;
+newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable<mixed>);
 
 <<__ConsistentConstruct>>
 /**
@@ -29,95 +23,100 @@ use HHReactor\CovWrapper;
  *   - _Endpoint equality_: If two endpoints are resolved at the same time, but have not yet ended any of their respective consumers, they are equal. Put a different way, endpoints are equal up to the same ready queue.
  * - _Lifetime_: The union of all arcs from the creation of the Producer to the endpoint.
  */
-class Producer<+T> implements AsyncIterator<T> {
-	private CovWrapper<Awaitable<mixed>> $stepped_awaitable;
-	private Awaitable<mixed> $total_awaitable;
+class Producer<+T> extends BaseProducer<T> {
 	private Queue<T> $lag;
-	/**
-	 * Create lifetime for the Iterator by transforming a collection of "emitters" by some reducing function.
-	 * 
-	 * **Timing**
-	 * - **Spec**
-	 *   - Must emit any ready-wait values from inputs in ready-wait fashion when iterated.
-	 *     - These ready-wait values may be emitted in any order.
-	 * @param $emitters - Maybe yield values. Maybe add another emitter. These certainly may be `Awaitable`s in disguise just wanting to be thrown on the scheduler.
-	 * @param [OBSOLETE] $reducer - Transform the `$emitters` into an Awaitable. v is the only way to reliably combine and guarantee the emitters will only emit within a certain time window.
-	 */
-	protected function __construct(
-		(function(Appender<T>): Iterable<AsyncIterator<T>>) $emitter_factory
-		// (function(Iterable<Awaitable<mixed>>): Awaitable<mixed>) $reducer = fun('\HH\Asio\v')
-	) {
+	private ?ConditionWaitHandle<mixed> $bell = null;
+	private Vector<Racecar<T>> $racetrack;
+	final protected function __construct(Vector<(function(Appender<T>): AsyncIterator<T>)> $generator_factories) {
+		// If I want this to be protected but other BaseProducer-children to maybe have public constructors, then I've gotta do this in each one. Kind of a pain, but (shrug emoji)
+		$this->refcount = new Wrapper(0);
+		$this->some_running = new Wrapper(false);
+		
 		$this->lag = new Queue();
 		
-		// $this->scheduler = new Extendable(($extend) ==> \HH\Asio\v($emitter_factory($extend)->map(($emitter) ==> $this->_awaitify($emitter, $extend))));
-		list($this->total_awaitable, $this->stepped_awaitable) = Resettable::create(async ($reset) ==> {
-			$awaitify = async (AsyncIterator<T> $iterator) ==> {
-				$wrapped_iterator = new AsyncIteratorWrapper($iterator);
-				$this->_pop_ready_wait_items($wrapped_iterator);
-				foreach($wrapped_iterator await as $v) {
-					$this->lag->add($v);
-					$reset();
-				}
-			};
-			await Extendable::create(async ($extend) ==> {
-				$schedule = (AsyncIterator<T> $iterator) ==> $extend($awaitify($iterator));
-				await \HH\Asio\v($emitter_factory($schedule)->map($awaitify));
-			});
-		});
-	}
+		// accept AsyncGenerator to ensure it's coming from an async function/block, but upcast to Iterator for convenience
+		// assume the function is a true AsyncGenerator (i.e. yields in the main body, so it won't be started until the first `next`.
+		$appender = (AsyncIterator<T> $incoming) ==> {
+			$bell = $this->bell;
+			if(!is_null($bell) && !$bell->isFinished())
+				$bell->succeed(null);
+			$this->racetrack->add(shape('engine' => $incoming, 'driver' => $this->awaitify($incoming)));
+		};
+		$this->racetrack = $generator_factories->map(($factory) ==> shape('engine' => $factory($appender), 'driver' => null)); //->map(($generator) ==> new GeneratorWrapper($generator));
+	} // Note: cold-ish
 	
-	final public static function create(AsyncIterator<T> $iterator): this {
-		return new static(($_) ==> Vector{ $iterator });
-	}
-	protected static function create_producer<Tv>(AsyncIterator<Tv> $iterator): Producer<Tv> {
-		return new static(($_) ==> Vector{ $iterator }); // note: static here is typed differently from static in self::create(): it is DerivedType <: Producer<Tv> rather than DerivedType <: Producer<T>
-		// kinda magical tbh
-	}
-	
-	private function _pop_ready_wait_items(AsyncIteratorWrapper<T> $iterator): void {
-		// weed out ready items
-		$next = $iterator->next();
-		while($next->getWaitHandle()->isFinished()) {
-			$concrete_next = $next->getWaitHandle()->result();
-			if(!is_null($concrete_next))
-				$this->lag->add($concrete_next[1]);
-			else
-				return;
-			
-			$next = $iterator->next();
-		}
-	}
-	
-	/**
-	 * Separate properties of cloned EmitIterators expected to be separate.
-	 */
 	public function __clone(): void {
-		// Advance queue independently, but receive new, shared values
 		$this->lag = clone $this->lag;
 	}
 	
-	/**
-	 * Create an `Awaitable` representing the next element at time of call.
-	 * 
-	 * **Timing**:
-	 * - **Spec**
-	 *   - Any number of elements may be queued and returned in ready-wait fashion; that is, without returning control to the top level during iteration with `await as`, even if they are not produced in ready-wait fashion.
-	 */
-	public async function next(): Awaitable<?(mixed, T)> {
-		try {
-			await $this->stepped_awaitable->get();
-			if(!$this->lag->is_empty())
-				return tuple(null, $this->lag->shift());
-		}
-		catch(\InvalidArgumentException $e) {
-			if($e->getMessage() != 'ConditionWaitHandle not notified by its child.')
-				throw $e;
-		}
-		return null;
+	private function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
+		$stashed_some_running = $this->some_running;
+		return async {
+			foreach($incoming await as $v) {
+				$bell = $this->bell;
+				if(!is_null($bell) && !$bell->isFinished())
+					$bell->succeed(null);
+				
+				$this->lag->add($v);
+				if(!$stashed_some_running->get())
+					// stop buffering
+					return;
+			}
+		};
 	}
 	
-	public function is_finished(): bool {
-		return $this->lag->is_empty() && $this->total_awaitable->getWaitHandle()->isFinished();
+	private function driver_lifetimes(): WaitHandle<void> {
+		return voidify(\HH\Asio\v($this->racetrack->map(($racecar) ==> {
+			$driver = $racecar['driver'];
+			invariant(!is_null($driver), 'Implementation error: expected driving Awaitable to be set before `_next`.');
+			return $driver;
+		})));
+	}
+	
+	public function is_producing(): bool {
+		return !$this->driver_lifetimes()->isFinished();
+	}
+	
+	public function is_paused(): bool {
+		return !$this->some_running->get();
+	}
+	
+	protected function _attach(): void {
+		// I do want to reset the value, right?
+		foreach($this->racetrack as $racecar) {
+			$racecar['driver'] = async {
+				$driver = $racecar['driver'];
+				if(!is_null($driver) && !$driver->getWaitHandle()->isFinished())
+					await $driver;
+				await $this->awaitify($racecar['engine']);
+			};
+		}
+	}
+	
+	protected async function _next(): Awaitable<?(mixed, T)> {
+		while(!$this->lag->is_empty()) {
+			try {
+				if(is_null($this->bell) || $this->bell->isFinished()) {
+					$this->bell = ConditionWaitHandle::create($this->driver_lifetimes());
+				}
+				await $this->bell;
+			}
+			catch(\InvalidArgumentException $e) {
+				if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')
+					throw $e;
+				else
+					return null; // either the generators are exhausted, or they aborted from total detachment. Either way, this iterator is finished as far as the calling scope is concerned: end the iterator
+			}
+		}
+		return tuple(null, $this->lag->shift());
+	}
+	
+	final public static function create(AsyncIterator<T> $incoming): this {
+		return new static(Vector{ ($_) ==> $incoming });
+	}
+	
+	final public static function create_producer<Tv>(AsyncIterator<Tv> $incoming): Producer<Tv> {
+		return new self(Vector{ ($_) ==> $incoming });
 	}
 	
 	/**
@@ -186,12 +185,12 @@ class Producer<+T> implements AsyncIterator<T> {
 		return self::create_from_awaitables(Vector{ $awaitable });
 	}
 	
-	final public static function create_from_awaitables(Iterable<Awaitable<T>> $awaitables): this {
+	final public static function create_from_awaitables(Vector<Awaitable<T>> $awaitables): this {
 		return new static(
-			($_) ==> $awaitables->map(async ($awaitable) ==> {
+			$awaitables->map(($awaitable) ==> (async ($_) ==> {
 				$v = await $awaitable;
 				yield $v;
-			})
+			}))
 		);
 	}
 	
@@ -343,14 +342,13 @@ class Producer<+T> implements AsyncIterator<T> {
 	 */
 	public function flat_map<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
-		return new self(($appender) ==> Vector{
-				new DelayedEmptyAsyncIterator(async {
-					foreach($clone await as $seed) {
-						$subclone = clone $meta($seed);
-						$appender($subclone);
-					}
-				})
-			}
+		return new self(Vector{ ($appender) ==> 
+			new DelayedEmptyAsyncIterator(async {
+				foreach($clone await as $seed) {
+					$subclone = clone $meta($seed);
+					$appender($subclone);
+				}
+			}) }
 		);
 	}
 	/**
@@ -369,7 +367,7 @@ class Producer<+T> implements AsyncIterator<T> {
 	public function switch_on_next<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
 		return new static(
-			($appender) ==> Vector{
+			Vector{ ($appender) ==> 
 				new DelayedEmptyAsyncIterator(async {
 					$current_idx = new Wrapper(-1);
 					foreach($clone await as $seed) {
@@ -400,6 +398,7 @@ class Producer<+T> implements AsyncIterator<T> {
 	 * @param $keysmith - Assign `Tk`-valued keys to `T`-valued items
 	 */
 	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
+		// materializing subjects out of vectors and conditions... not my proudest moment
 		$clone = clone $this;
 		$subjects = Map{}; // Map<Tk, (ConditionWaitHandle<mixed>, SplQueue<T>)>
 		$producer_wrapper = new Wrapper(null);
@@ -478,6 +477,14 @@ class Producer<+T> implements AsyncIterator<T> {
 	 *   - The last value of the original Producer, if there is one, must be produced in the return value.
 	 * @param $usecs - The "timespan" as described above, in microseconds.
 	 */
+	
+	// public function debounce(int $usecs): this {
+	// 	$clone = clone $this;
+	// 	return new static(Vector{ ($appender) ==> {
+	// 		foreach()
+	// 	} })
+	// }
+	
 	// public function debounce(int $usecs): this {
 	// 	$clone = clone $this;
 	// 	$extendable = new Wrapper(new Extendable($clone->next()));
@@ -516,17 +523,25 @@ class Producer<+T> implements AsyncIterator<T> {
 	 */
 	public function window(Producer<mixed> $signal): Producer<this> {
 		$clone = clone $this;
+		$signal_clone = clone $signal;
 		return static::create_producer(async {
-			while(!$signal->is_finished() && !$clone->is_finished()) {
-				$window = new static(
-					($_) ==> Vector{ $clone },
-					(Iterable<Awaitable<mixed>> $total) ==>
-						Producer::from_nonblocking($total->concat(Vector{ $signal->next() }))
-				              ->first() // race the next signal tick and the bulk emitter total
-         	);
-         	yield $window;
-         	await $window->get_lifetime();
+			$i = new Wrapper(0);
+			do {
+				yield static::create(async {
+					$stashed_i = $i->get();
+					foreach(clone $clone await as $v) {
+						if($i->get() !== $stashed_i)
+							// the window has closed/
+							// note: we'll keep producing on this window if the windower stops producing
+							return;
+						yield $v;
+					}
+				});
+				$i->v++;
+				$next = await $signal_clone->next();
 			}
+			while(!is_null($next)); // a more naive stop condition, but much more expressive
+			// while($signal_clone->is_producing()); // this is more technically correct, but for now there isn't any difference here, and the former is easier to debug
 		});
 	}
 	
@@ -555,12 +570,12 @@ class Producer<+T> implements AsyncIterator<T> {
 		});
 	}
 	
-	public final static function defer((function(): Producer<T>) $factory): this {
-		return static::create(new DeferredProducer($factory));
-	}
-	public static function empty(): this {
-		return static::create(new EmptyAsyncIterator());
-	}
+	// public final static function defer((function(): Producer<T>) $factory): this {
+	// 	return static::create(new DeferredProducer($factory));
+	// }
+	// public static function empty(): this {
+	// 	return static::create(new EmptyAsyncIterator());
+	// }
 	public static function throw(\Exception $e): this {
 		return new static(async {
 			throw $e;
@@ -604,10 +619,7 @@ class Producer<+T> implements AsyncIterator<T> {
 			yield $v;
 		});
 	}
-	public static final function from_nonblocking(Iterable<Awaitable<T>> $subawaitables): this {
-		return static::create_from_awaitables($subawaitables);
-	}
-	public final static function from(Iterable<Awaitable<T>> $subawaitables): this {
+	public final static function from(Vector<Awaitable<T>> $subawaitables): this {
 		return static::create(async {
 			foreach($subawaitables as $v) {
 				$v = await $v;
@@ -615,8 +627,8 @@ class Producer<+T> implements AsyncIterator<T> {
 			}
 		});
 	}
-	public final static function merge(Iterable<AsyncIterator<T>> $producers): this {
-		return new static(($_) ==> $producers);
+	public final static function merge(Vector<AsyncIterator<T>> $producers): this {
+		return new static($producers->map(($producer) ==> ($_) ==> $producer));
 	}
 	/**
 	 * [Combine the emissions of multiple Observables together via a specified function and emit single items for each combination based on the results of this function.](http://reactivex.io/documentation/operators/zip.html)
@@ -640,15 +652,15 @@ class Producer<+T> implements AsyncIterator<T> {
 	}
 	public static function combine_latest<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu, Tv): Tx) $combiner): Producer<Tx> {
 		$latest = tuple(null, null);
-		return new static(($_) ==> Vector{
-			async {
+		return new static(Vector{
+			async ($appender) ==>  {
 				foreach(clone $A await as $v) {
 					$latest[0] = $v;
 					list($u, $v) = $latest;
 					if(!is_null($u) && !is_null($v))
 						yield $combiner($u, $v);
 				}
-			}, async {
+			}, async ($appender) ==> {
 				foreach(clone $B await as $v) {
 					$latest[1] = $v;
 					list($u, $v) = $latest;
@@ -663,8 +675,8 @@ class Producer<+T> implements AsyncIterator<T> {
 		$latest_timer = tuple(async {}, async {});
 		$latest = tuple(null, null);
 		return new static(
-			($appender) ==> Vector{ 
-				async {
+			Vector{
+				async ($appender) ==> {
 					foreach(clone $A await as $u) {
 						$latest_timer[0] = $A_timer($u);
 						$latest[0] = $u;
@@ -675,7 +687,7 @@ class Producer<+T> implements AsyncIterator<T> {
 							yield $combiner($u, $v);
 					}
 				},
-				async {
+				async ($appender) ==> {
 					foreach(clone $B await as $v) {
 						$latest_timer[1] = $B_timer($v);
 						$latest[1] = $v;
