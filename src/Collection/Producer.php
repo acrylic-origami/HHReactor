@@ -24,43 +24,55 @@ newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable
  * - _Lifetime_: The union of all arcs from the creation of the Producer to the endpoint.
  */
 class Producer<+T> extends BaseProducer<T> {
-	private Queue<T> $lag;
-	private ?ConditionWaitHandle<mixed> $bell = null;
+	private Queue<T> $buffer;
+	private Wrapper<?ConditionWaitHandle<mixed>> $bell;
 	private Vector<Racecar<T>> $racetrack;
 	final protected function __construct(Vector<(function(Appender<T>): AsyncIterator<T>)> $generator_factories) {
 		// If I want this to be protected but other BaseProducer-children to maybe have public constructors, then I've gotta do this in each one. Kind of a pain, but (shrug emoji)
-		$this->refcount = new Wrapper(0);
-		$this->some_running = new Wrapper(false);
+		$this->running_count = new Wrapper(0);
+		// $this->refcount = new Wrapper(1);
+		$this->some_running = new Wrapper(new Wrapper(false));
+		$stashed_running = $this->some_running;
 		
-		$this->lag = new Queue();
+		$this->buffer = new Queue();
+		$this->bell = new Wrapper(null);
 		
-		// accept AsyncGenerator to ensure it's coming from an async function/block, but upcast to Iterator for convenience
-		// assume the function is a true AsyncGenerator (i.e. yields in the main body, so it won't be started until the first `next`.
 		$appender = (AsyncIterator<T> $incoming) ==> {
-			$bell = $this->bell;
+			$bell = $this->bell->get();
 			if(!is_null($bell) && !$bell->isFinished())
 				$bell->succeed(null);
-			$this->racetrack->add(shape('engine' => $incoming, 'driver' => $this->awaitify($incoming)));
+			
+			// hopefully the ordering of these instructions doesn't matter
+			// this check wouldn't be necessary if these were pure generators, because the generators couldn't call the extender before the first `next`.
+			
+			// echo 'APPEND!'; var_dump($this->some_running);
+			// var_dump($stashed_running);
+			$driver = null;
+			if(true === $this->some_running->get()->get())
+				$driver = $this->awaitify($incoming);
+			$this->racetrack->add(shape('engine' => $incoming, 'driver' => $driver));
+			// var_dump($this->racetrack);
 		};
-		$this->racetrack = $generator_factories->map(($factory) ==> shape('engine' => $factory($appender), 'driver' => null)); //->map(($generator) ==> new GeneratorWrapper($generator));
+		$this->racetrack = $generator_factories->map(($factory) ==> shape('engine' => $factory($appender), 'driver' => null));
 	} // Note: cold-ish
 	
 	public function __clone(): void {
-		$this->lag = clone $this->lag;
+		$this->buffer = clone $this->buffer;
+		// $this->refcount->v++;
 	}
 	
 	private function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
-		$stashed_some_running = $this->some_running;
+		$stashed_some_running = $this->some_running->get();
 		return async {
 			foreach($incoming await as $v) {
-				$bell = $this->bell;
+				$bell = $this->bell->get();
 				if(!is_null($bell) && !$bell->isFinished())
 					$bell->succeed(null);
 				
-				$this->lag->add($v);
-				if(!$stashed_some_running->get())
-					// stop buffering
+				$this->buffer->add($v);
+				if(false === $stashed_some_running->get()) {
 					return;
+				}
 			}
 		};
 	}
@@ -73,42 +85,51 @@ class Producer<+T> extends BaseProducer<T> {
 		})));
 	}
 	
-	public function is_producing(): bool {
-		return !$this->driver_lifetimes()->isFinished();
-	}
-	
 	public function is_paused(): bool {
 		return !$this->some_running->get();
 	}
 	
 	protected function _attach(): void {
 		// I do want to reset the value, right?
-		foreach($this->racetrack as $racecar) {
-			$racecar['driver'] = async {
+		foreach($this->racetrack as $k => $racecar) {
+			$this->racetrack[$k]['driver'] = async {
 				$driver = $racecar['driver'];
 				if(!is_null($driver) && !$driver->getWaitHandle()->isFinished())
 					await $driver;
-				await $this->awaitify($racecar['engine']);
+				$awaited = $this->awaitify($racecar['engine']);
+				// var_dump($this->some_running);
+				await $awaited;
 			};
 		}
+		// var_dump($this->racetrack);
 	}
 	
 	protected async function _next(): Awaitable<?(mixed, T)> {
-		while(!$this->lag->is_empty()) {
+		while($this->buffer->is_empty()) {
 			try {
-				if(is_null($this->bell) || $this->bell->isFinished()) {
-					$this->bell = ConditionWaitHandle::create($this->driver_lifetimes());
+				$bell = $this->bell->get();
+				if(is_null($bell) || $bell->isFinished()) {
+					$this->bell->set(ConditionWaitHandle::create($this->driver_lifetimes()));
 				}
-				await $this->bell;
+				await $this->bell->get();
 			}
 			catch(\InvalidArgumentException $e) {
 				if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')
 					throw $e;
-				else
-					return null; // either the generators are exhausted, or they aborted from total detachment. Either way, this iterator is finished as far as the calling scope is concerned: end the iterator
+				else {
+					// if($this->some_running->get()) {
+					// 	// Assume that if the some_running fbuffer is still set, the iterator just finished and this is the first `next` to know about it.
+					// 	// Assume that some_running would be unset by the __destruct-detach impl if this Producer was paused from orphaning
+					// 	$this->some_running->set(false);
+					// }
+					// var_dump($this->racetrack);
+					if(!$this->buffer->is_empty())
+						break;
+					return null; // either the generators are exhausted, or they aborted from orphaning. Either way, this iterator is finished as far as the calling scope is concerned: end the iterator
+				}
 			}
 		}
-		return tuple(null, $this->lag->shift());
+		return tuple(null, $this->buffer->shift());
 	}
 	
 	final public static function create(AsyncIterator<T> $incoming): this {
@@ -140,8 +161,8 @@ class Producer<+T> extends BaseProducer<T> {
 	 */
 	public function fast_forward(): Iterator<T> {
 		// no risk of "Generator already started" or "Changed during iteration" exceptions, because there are no underlying core Hack collections in LinkedList iterables
-		while(!$this->lag->is_empty()) {
-			$next = $this->lag->shift();
+		while(!$this->buffer->is_empty()) {
+			$next = $this->buffer->shift();
 			if(!is_null($next))
 				yield $next;
 		}

@@ -3,30 +3,34 @@ namespace HHReactor\Collection;
 use HH\Asio\AsyncCondition;
 use HHReactor\Wrapper;
 abstract class BaseProducer<+T> implements AsyncIterator<T> {
-	protected Wrapper<int> $refcount;
+	// protected Wrapper<int> $refcount;
+	protected Wrapper<int> $running_count;
 	private bool $this_running = false;
-	protected Wrapper<bool> $some_running;
+	protected Wrapper<Wrapper<bool>> $some_running;
 	
 	protected function detach(): void {
 		if($this->this_running) {
-			$this->refcount->v--;
-			if($this->refcount->get() === 0)
-				$this->some_running->set(false);
+			$this->running_count->v--;
+			if($this->running_count->get() === 0) {
+				// echo 'UNSET!!!';
+				$this->some_running->get()->set(false);
+			}
 		}
 	}
 	abstract protected function _attach(): void;
 	abstract protected function _next(): Awaitable<?(mixed, T)>;
 	public function __destruct(): void {
+		// $this->refcount->v--;
 		$this->detach();
 	}
 	public function next(): Awaitable<?(mixed, T)> {
 		if(!$this->this_running) {
 			$this->this_running = true;
-			if(!$this->some_running->get()) {
-				$this->some_running = new Wrapper(true);
+			if(!$this->some_running->get()->get()) {
+				$this->some_running->set(new Wrapper(true));
+				$this->_attach();
 			}
-			$this->refcount->v++;
-			$this->_attach();
+			$this->running_count->v++;
 		}
 		return $this->_next();
 	}
