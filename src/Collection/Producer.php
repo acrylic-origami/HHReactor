@@ -340,20 +340,6 @@ class Producer<+T> extends BaseProducer<T> {
 	public function reduce<Tv super T>((function(T, T): Tv) $f): Awaitable<?Tv> {
 		return $this->scan($f)->last();
 	}
-<<<<<<< HEAD
-	private function flat_map<Tv>((function(T): Producer<Tv>) $f): Producer<Tv> {
-		// this would kill it as an anonymous class, but alas not yet
-		$race_handle = new ResettableConditionWaitHandle();
-		$cloned = clone $this;
-		$total_awaitable = null;
-		$emitter = async {
-			await \HH\Asio\later(); // guarantee that the race handle is set
-			$pending_producers = new TotalAwaitable(Vector{ $cloned->next() });
-			foreach($cloned await as $core_v) {
-				$producer = clone $f($core_v); // should i clone defensively?
-				foreach($producer->fast_forward() as $v) {
-					await $race_handle->succeed($v); // note: if another element is resolved while dealing with this ready-waited result, then it could very well take precedence: this is not guaranteed to resolve consecutively.
-=======
 	
 	/**
 	 * [Transform the items emitted by an Observable into Observables, then flatten the emissions from those into a single Observable](http://reactivex.io/documentation/operators/flatmap.html)
@@ -373,7 +359,6 @@ class Producer<+T> extends BaseProducer<T> {
 				foreach($clone await as $seed) {
 					$subclone = clone $meta($seed);
 					$appender($subclone);
->>>>>>> dev-master
 				}
 			}) }
 		);
@@ -410,19 +395,6 @@ class Producer<+T> extends BaseProducer<T> {
 					}
 				})
 			}
-<<<<<<< HEAD
-		};
-		$total_awaitable = new TotalAwaitable(Vector{ $emitter });
-		$race_handle->set(() ==> $total_awaitable);
-		return new static(static::_listen_produce($race_handle, $total_awaitable));
-	}
-	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
-		$handles = Map{};
-		$total_wait_handle = null;
-		$total_iterator = async {
-			await \HH\Asio\later(); // guarantee `$total_wait_handle` is set
-			foreach(clone $this await as $v) {
-=======
 		);
 	}
 	/**
@@ -449,7 +421,6 @@ class Producer<+T> extends BaseProducer<T> {
 			
 			// note: fail the trunk producer if this $clone value producer fails.
 			foreach($clone await as $v) {
->>>>>>> dev-master
 				$key = $keysmith($v);
 				if(!$subjects->containsKey($key)) {
 					// add emittee
@@ -483,18 +454,10 @@ class Producer<+T> extends BaseProducer<T> {
 						$subjects[$key][0]->succeed($v);
 				}
 			}
-<<<<<<< HEAD
-		};
-		$total_wait_handle = async {
-			foreach($total_iterator await as $_) {}
-		};
-		return new static($total_iterator);
-=======
 		}));
 		$producer = $producer_wrapper->get();
 		invariant(!is_null($producer), 'Producer is unconditionally set just above.');
 		return $producer;
->>>>>>> dev-master
 	}
 	/**
 	 * [Periodically gather items emitted by an Observable into bundles and emit these bundles rather than emitting the items one at a time.](http://reactivex.io/documentation/operators/buffer.html)
