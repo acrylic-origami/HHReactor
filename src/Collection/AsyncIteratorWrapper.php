@@ -1,32 +1,30 @@
 <?hh // strict
 namespace HHReactor\Collection;
-class AsyncIteratorWrapper<+T> implements AsyncIterator<T>, IHaltable {
-	private ?Haltable<?(mixed, T)> $handle = null;
+use HHReactor\Asio\Haltable;
+use HHReactor\Asio\HaltResult;
+class AsyncIteratorWrapper<+T> implements AsyncIterator<T> {
+	private ?Awaitable<?(mixed, T)> $handle = null;
 	public function __construct(private AsyncIterator<T> $iterator) {} // Note: cold behaviour
-	public function next(): Awaitable<?(mixed, T)> {
-		$handle = $this->handle;
-		if(is_null($handle) || $handle->getWaitHandle()->isFinished()) {
+	public async function next(): Awaitable<?(mixed, T)> {
+		if(is_null($this->handle) || $this->handle->getWaitHandle()->isFinished()) {
 			// refresh the handle if this is the first `next` call or the underlying awaitable has resolved
 			try {
-				$pending_next = $this->iterator->next();
+				if(!is_null($this->handle)) {
+					$result = $this->handle->getWaitHandle()->result();
+					// if(!is_null($result))
+					// 	printf("REFRESHED %s\n", $result[1]);
+				}
+				$this->handle = $this->iterator->next();
 			}
 			catch(\Exception $e) {
 				if($e->getMessage() !== 'Generator is already finished')
 					throw $e;
 				else
 					// for AsyncGenerators, continue issuing iterator termination signal
-					return async { return null; };
+					return null;
 			}
-			$this->handle = new Haltable($pending_next);
-			return $this->handle;
 		}
-		else
-			// the handle is still pending -- return it
-			return $handle;
-	}
-	public async function halt(?\Exception $e = null): Awaitable<void> {
-		$handle = $this->handle;
-		invariant(!is_null($handle), 'Attempted to halt producer before starting iteration.');
-		await $handle->halt($e);
+		$next = await $this->handle;
+		return $next;
 	}
 }

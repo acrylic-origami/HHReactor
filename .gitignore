@@ -8,5 +8,7 @@ composer.phar
 *.sublime-workspace
 *.sublime-project
 ._*
+*phpdoc
+doc/
 .DS_Store
 */sandbox/*
