@@ -19,6 +19,7 @@ class ConnectionIterator implements AsyncIterator<(Request, AsyncIterator<string
 			$status = await stream_await($this->server, STREAM_AWAIT_READ, 0.0);
 			if($status === STREAM_AWAIT_READY) {
 				$conn = stream_socket_accept($this->server, 0.0);
+				stream_set_blocking($conn, false);
 				// stream_set_read_buffer($conn, self::READ_BUFFER_SIZE);
 				do {
 					$status = await stream_await($conn, STREAM_AWAIT_READ, 0.0);
@@ -39,17 +40,20 @@ class ConnectionIterator implements AsyncIterator<(Request, AsyncIterator<string
 									async {
 										yield substr($total_buffer, $header_end); // yield initial fragment
 										
+										$buffer = null;
 										do {
 											$status = await stream_await($conn, STREAM_AWAIT_READ, 0.0);
 											// yield the rest of the body
-											if($status === STREAM_AWAIT_READY)
+											if($status === STREAM_AWAIT_READY) {
 												do {
 													$buffer = fread($conn, self::READ_BUFFER_SIZE);
 													yield $buffer;
 												}
-												while(strpos($buffer, 0x04) !== false); // look for EOF
+												while(strlen($buffer) === self::READ_BUFFER_SIZE && !feof($conn));
+											}
 										}
-										while(!feof($conn) && $status === STREAM_AWAIT_READY);
+										while(!feof($conn) && $status === STREAM_AWAIT_READY); // 
+										echo 'EXITED!';
 									}
 								)
 							);
