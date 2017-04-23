@@ -2,8 +2,6 @@
 
 HHReactor implements the ReactiveX operators that you know and love, but embraces the existing async features of Hack, and defects from the Reactive Manifesto with an I-call-you iterator-based mechanic over the you-call-me callback-based approach. There are no objects managing subscriptions, and there is no need: `Producer`s generate elements with `yield`, these elements are retrieved through `foreach-await`, errors are handled with `try-catch`, and completion logic is whatever follows the `foreach` block. The entire library behavior is concentrated in `Producer`, which provides all of the operators.
 
-`Producer`s can be cancelled by invoking `halt` on the object. This behavior is also distinct from ReactiveX in that it stops _the Producer itself_. The more familiar and weaker behavior &mdash; to stop receiving values &mdash; is a simple matter of `break;` in HHReactor (over `Subscription::cancel()` in ReactiveX).
-
 Single-valued operators &mdash; aggregate operators like `reduce` or filters like `last` &mdash; also have the convenience and expressive power of being `Awaitable`s over `AsyncIterator`s, so their values are usable immediately in proceeding code.
 
 ### Usage
@@ -47,6 +45,14 @@ $last_odd = (clone $root)->filter((int $v) ==> (bool) $v % 2)
 });
 ```
 
-### Sidechaining
+### Resource management
 
-As an added feature, HHReactor extends the async-await model by providing, in Producer scopes, a scheduler to sidechain void async code. This is the one advantage that the callback mechanic has over await-async, since in the latter all\* `Awaitable`s block the current scope, even if the scope doesn't have a value dependency. \*With some careful puppeteering of `ConditionWaitHandle`, HHReactor makes it possible to set-and-forget async behavior from any scope with access to an active `Producer`.
+`Producer`s aim to be as lazy as possible to setup resources and as proactive as it can with the passive messages it receives to tear resources down.
+
+#### Setup
+
+Hack doesn't guarantee any behavior when `Awaitable`s are not `await`ed upon creation, but the spec suggests that when the underlying system calls block, then `await`s will begin to block their scopes. This matters with user-land `AsyncIterator`s, but not with `AsyncGenerator`s, which aren't started at all until the first `next` call to them, which `Producer` defers until its own first `next` call.
+
+#### Teardown
+
+When the last running (i.e. at least one element has been produced) `Producer` reference becomes inaccessible, the `Producer` will stop iterating its children and, as a result, stops buffering elements. When all references (both running and unstarted) to a `Producer` become inaccessible, and it holds the only references to its children (it should), then HHReactor leaves it to the GC to clean up the resources. If the need arises, descendants of `Producer` may define a destructor that cleans up resources explicitly too.
