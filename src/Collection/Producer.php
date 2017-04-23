@@ -32,7 +32,6 @@ class Producer<+T> extends BaseProducer<T> {
 		$this->running_count = new Wrapper(0);
 		// $this->refcount = new Wrapper(1);
 		$this->some_running = new Wrapper(new Wrapper(false));
-		$stashed_running = $this->some_running;
 		
 		$this->buffer = new Queue();
 		$this->bell = new Wrapper(null);
@@ -45,13 +44,10 @@ class Producer<+T> extends BaseProducer<T> {
 			// hopefully the ordering of these instructions doesn't matter
 			// this check wouldn't be necessary if these were pure generators, because the generators couldn't call the extender before the first `next`.
 			
-			// echo 'APPEND!'; var_dump($this->some_running);
-			// var_dump($stashed_running);
 			$driver = null;
 			if(true === $this->some_running->get()->get())
 				$driver = $this->awaitify($incoming);
 			$this->racetrack->add(shape('engine' => $incoming, 'driver' => $driver));
-			// var_dump($this->racetrack);
 		};
 		$this->racetrack = $generator_factories->map(($factory) ==> shape('engine' => $factory($appender), 'driver' => null));
 	} // Note: cold-ish
@@ -97,11 +93,9 @@ class Producer<+T> extends BaseProducer<T> {
 				if(!is_null($driver) && !$driver->getWaitHandle()->isFinished())
 					await $driver;
 				$awaited = $this->awaitify($racecar['engine']);
-				// var_dump($this->some_running);
 				await $awaited;
 			};
 		}
-		// var_dump($this->racetrack);
 	}
 	
 	protected async function _next(): Awaitable<?(mixed, T)> {
@@ -118,13 +112,10 @@ class Producer<+T> extends BaseProducer<T> {
 					throw $e;
 				else {
 					// if($this->some_running->get()) {
-					// 	// Assume that if the some_running fbuffer is still set, the iterator just finished and this is the first `next` to know about it.
+					// 	// Assume that if the some_running flag is still set, the iterator just finished and this is the first `next` to know about it.
 					// 	// Assume that some_running would be unset by the __destruct-detach impl if this Producer was paused from orphaning
 					// 	$this->some_running->set(false);
 					// }
-					// var_dump($this->racetrack);
-					if(!$this->buffer->is_empty())
-						break;
 					return null; // either the generators are exhausted, or they aborted from orphaning. Either way, this iterator is finished as far as the calling scope is concerned: end the iterator
 				}
 			}

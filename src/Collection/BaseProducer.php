@@ -12,7 +12,6 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 		if($this->this_running) {
 			$this->running_count->v--;
 			if($this->running_count->get() === 0) {
-				// echo 'UNSET!!!';
 				$this->some_running->get()->set(false);
 			}
 		}
