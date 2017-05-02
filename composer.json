@@ -18,7 +18,8 @@
 		"libreworks/psr3-log-hhi": "^1.0.0",
 		"hhvm/systemlib-extractor": "^0.1.0",
 		"91carriage/phpunit-hhi": "~5.6",
-		"phpunit/phpunit": "~5.6"
+		"phpunit/phpunit": "~5.6",
+		"fredemmott/hack-error-suppressor": "dev-master as 1.0.1"
 	},
 	"repositories": [{
 		"type": "vcs",

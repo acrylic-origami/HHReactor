@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#composer-lock-the-lock-file",
         "This file is @generated automatically"
     ],
-    "content-hash": "5fac5c329bd0e4e259f424641eaf2ca2",
+    "content-hash": "06faaf1500664393ff94ea05b437eb0a",
     "packages": [
         {
             "name": "91carriage/phpunit-hhi",
@@ -146,12 +146,12 @@
             "version": "v1.0.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/fredemmott/hack-error-suppressor.git",
+                "url": "https://github.com/acrylic-origami/hack-error-suppressor.git",
                 "reference": "acaba332c5597455b9900388b00b11a53d773a93"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/fredemmott/hack-error-suppressor/zipball/acaba332c5597455b9900388b00b11a53d773a93",
+                "url": "https://api.github.com/repos/acrylic-origami/hack-error-suppressor/zipball/acaba332c5597455b9900388b00b11a53d773a93",
                 "reference": "acaba332c5597455b9900388b00b11a53d773a93",
                 "shasum": ""
             },
@@ -222,12 +222,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/acrylic-origami/psr7.git",
-                "reference": "9da810caf0d9f4ce3e3704cdc64ae90e84b187ac"
+                "reference": "2dde84766397301b2ce1e19d26b0a1361c139d0a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/acrylic-origami/psr7/zipball/9da810caf0d9f4ce3e3704cdc64ae90e84b187ac",
-                "reference": "9da810caf0d9f4ce3e3704cdc64ae90e84b187ac",
+                "url": "https://api.github.com/repos/acrylic-origami/psr7/zipball/2dde84766397301b2ce1e19d26b0a1361c139d0a",
+                "reference": "2dde84766397301b2ce1e19d26b0a1361c139d0a",
                 "shasum": ""
             },
             "require": {
@@ -281,7 +281,7 @@
             "support": {
                 "source": "https://github.com/acrylic-origami/psr7/tree/master"
             },
-            "time": "2017-04-23 05:25:24"
+            "time": "2017-04-29 13:34:25"
         },
         {
             "name": "psr/http-message",
