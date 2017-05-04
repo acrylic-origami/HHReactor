@@ -14,9 +14,9 @@ class ConstDependencies<+T> {
 	public function failed(): Vector<\Exception> {
 		$exceptions = Vector{};
 		foreach($this->dependencies as $dependency) {
-			if($dependency->getWaitHandle()->isFailed()) {
+			if(\HH\Asio\has_finished($dependency->getWaitHandle())) {
 				try {
-					$dependency->getWaitHandle()->result();
+					\HH\Asio\result($dependency->getWaitHandle());
 				}
 				catch(\Exception $e) {
 					$exceptions->add($e);
@@ -33,16 +33,23 @@ class ConstDependencies<+T> {
 	public function all_finished(): bool {
 		if(!$this->all['finished'])
 			foreach($this->dependencies as $dependency)
-				if(!$dependency->getWaitHandle()->isFinished())
+				if(!\HH\Asio\has_finished($dependency->getWaitHandle()))
 					return ($this->all['finished'] = false);
 		return ($this->all['finished'] = true);
 	}
 	
 	public function any_failed(): bool {
 		if(!$this->any['failed']) {
-			foreach($this->dependencies as $dependency)
-				if(!$dependency->getWaitHandle()->isFailed())
-					return ($this->any['failed'] = true);
+			foreach($this->dependencies as $dependency) {
+				if(\HH\Asio\has_finished($dependency->getWaitHandle())) {
+					try {
+						\HH\Asio\result($dependency->getWaitHandle());
+					}
+					catch(\Exception $e) {
+						return ($this->any['failed'] = true);
+					}
+				}
+			}
 			return false;
 		}
 		else
@@ -51,17 +58,31 @@ class ConstDependencies<+T> {
 	
 	public function all_failed(): bool {
 		if(!$this->all['failed'])
-			foreach($this->dependencies as $dependency)
-				if(!$dependency->getWaitHandle()->isFailed())
+			foreach($this->dependencies as $dependency) {
+				if(\HH\Asio\has_finished($dependency->getWaitHandle())) {
+					try {
+						\HH\Asio\result($dependency->getWaitHandle());
+						return ($this->all['failed'] = false);
+					}
+					catch(\Exception $e) { continue; }
+				}
+				else
 					return ($this->all['failed'] = false);
+			}
 		return ($this->all['failed'] = true);
 	}
 	
 	public function any_succeeded(): bool {
 		if(!$this->any['succeeded']) {
-			foreach($this->dependencies as $dependency)
-				if($dependency->getWaitHandle()->isSucceeded())
-					return ($this->any['succeeded'] = true);
+			foreach($this->dependencies as $dependency) {
+				if(\HH\Asio\has_finished($dependency->getWaitHandle())) {
+					try {
+						\HH\Asio\result($dependency->getWaitHandle());
+						return ($this->any['succeeded'] = true);
+					}
+					catch(\Exception $e) { continue; }
+				}
+			}
 			return false;
 		}
 		else
@@ -69,10 +90,20 @@ class ConstDependencies<+T> {
 	}
 	
 	public function all_succeeded(): bool {
-		if(!$this->all['succeeded'])
-			foreach($this->dependencies as $dependency)
-				if(!$dependency->getWaitHandle()->isSucceeded())
+		if(!$this->all['succeeded']) {
+			foreach($this->dependencies as $dependency) {
+				if(\HH\Asio\has_finished($dependency->getWaitHandle())) {
+					try {
+						\HH\Asio\result($dependency->getWaitHandle());
+					}
+					catch(\Exception $e) {
+						return ($this->all['succeeded'] = false);
+					}
+				}
+				else
 					return ($this->all['succeeded'] = false);
+			}
+		}
 		return ($this->all['succeeded'] = true);
 	}
 }
