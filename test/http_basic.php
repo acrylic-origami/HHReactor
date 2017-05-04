@@ -4,10 +4,15 @@ require_once __DIR__ . '/../vendor/hh_autoload.php';
 use HHReactor\HTTP\ConnectionIterator;
 /* HH_IGNORE_ERROR[1002] */
 \HH\Asio\join(async {
-	$iterator = new ConnectionIterator(1337);
-	foreach($iterator await as $request) {
-		var_dump($request[0]);
-		foreach($request[1] await as $buf)
-			var_dump($buf);
+	$iterator = new ConnectionIterator(8080);
+	foreach($iterator await as $connection) {
+		$header = $connection->get_request();
+		var_dump($header);
+		$body = '';
+		foreach($connection await as $buf)
+			$body .= $buf;
+		var_dump($body);
+		await $connection->write("HTTP/1.1 200 OK\r\n\r\n");
+		echo 'RESPONDED!';
 	}
 });

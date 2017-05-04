@@ -1,5 +1,6 @@
 <?hh // strict
-namespace HHReactor\Collection;
+namespace HHReactor\Producer;
+use HHReactor\Producer;
 class DeferredProducer<+T> implements AsyncIterator<T> {
 	private ?Producer<T> $producer;
 	public function __construct(private (function(): Producer<T>) $factory) {}

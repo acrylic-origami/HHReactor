@@ -6,11 +6,11 @@ class AsyncIteratorWrapper<+T> implements AsyncIterator<T> {
 	private ?Awaitable<?(mixed, T)> $handle = null;
 	public function __construct(private AsyncIterator<T> $iterator) {} // Note: cold behaviour
 	public async function next(): Awaitable<?(mixed, T)> {
-		if(is_null($this->handle) || $this->handle->getWaitHandle()->isFinished()) {
+		if(is_null($this->handle) || \HH\Asio\has_finished($this->handle->getWaitHandle())) {
 			// refresh the handle if this is the first `next` call or the underlying awaitable has resolved
 			try {
 				if(!is_null($this->handle)) {
-					$result = $this->handle->getWaitHandle()->result();
+					$result = \HH\Asio\result($this->handle->getWaitHandle());
 					// if(!is_null($result))
 					// 	printf("REFRESHED %s\n", $result[1]);
 				}

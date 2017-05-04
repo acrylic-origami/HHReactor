@@ -1,3 +1,3 @@
 <?hh // strict
-namespace HHReactor\Collection;
+namespace HHReactor;
 type Appender<T> = (function(AsyncIterator<T>): void);

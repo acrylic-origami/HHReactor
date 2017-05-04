@@ -1,8 +1,8 @@
 <?hh // strict
-namespace HHReactor\Collection;
+namespace HHReactor;
 use HHReactor\Asio\DelayedEmptyAsyncIterator;
+use HHReactor\Collection\Queue;
 use function HHReactor\Asio\voidify;
-use HHReactor\Wrapper;
 newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable<mixed>);
 
 <<__ConsistentConstruct>>
@@ -24,37 +24,22 @@ newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable
  * - _Lifetime_: The union of all arcs from the creation of the Producer to the endpoint.
  */
 class Producer<+T> extends BaseProducer<T> {
-	private Queue<T> $buffer;
 	private Wrapper<?ConditionWaitHandle<mixed>> $bell;
 	private Vector<Racecar<T>> $racetrack;
 	final protected function __construct(Vector<(function(Appender<T>): AsyncIterator<T>)> $generator_factories) {
 		// If I want this to be protected but other BaseProducer-children to maybe have public constructors, then I've gotta do this in each one. Kind of a pain, but (shrug emoji)
+		$this->buffer = new Queue();
 		$this->running_count = new Wrapper(0);
 		// $this->refcount = new Wrapper(1);
 		$this->some_running = new Wrapper(new Wrapper(false));
 		
-		$this->buffer = new Queue();
 		$this->bell = new Wrapper(null);
 		
-		$appender = (AsyncIterator<T> $incoming) ==> {
-			$bell = $this->bell->get();
-			if(!is_null($bell) && !$bell->isFinished())
-				$bell->succeed(null);
-			
-			// hopefully the ordering of these instructions doesn't matter
-			// this check wouldn't be necessary if these were pure generators, because the generators couldn't call the extender before the first `next`.
-			
-			$driver = null;
-			if(true === $this->some_running->get()->get())
-				$driver = $this->awaitify($incoming);
-			$this->racetrack->add(shape('engine' => $incoming, 'driver' => $driver));
-		};
-		$this->racetrack = $generator_factories->map(($factory) ==> shape('engine' => $factory($appender), 'driver' => null));
+		$this->racetrack = $generator_factories->map(($factory) ==> shape('engine' => $factory(($iterator) ==> $this->_append($iterator)), 'driver' => null));
 	} // Note: cold-ish
 	
-	public function __clone(): void {
-		$this->buffer = clone $this->buffer;
-		// $this->refcount->v++;
+	public function sidechain(Awaitable<mixed> $incoming): void {
+		$this->_append(new DelayedEmptyAsyncIterator($incoming));
 	}
 	
 	private function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
@@ -62,7 +47,7 @@ class Producer<+T> extends BaseProducer<T> {
 		return async {
 			foreach($incoming await as $v) {
 				$bell = $this->bell->get();
-				if(!is_null($bell) && !$bell->isFinished())
+				if(!is_null($bell) && !\HH\Asio\has_finished($bell))
 					$bell->succeed(null);
 				
 				$this->buffer->add($v);
@@ -76,7 +61,7 @@ class Producer<+T> extends BaseProducer<T> {
 	private function driver_lifetimes(): WaitHandle<void> {
 		return voidify(\HH\Asio\v($this->racetrack->map(($racecar) ==> {
 			$driver = $racecar['driver'];
-			invariant(!is_null($driver), 'Implementation error: expected driving Awaitable to be set before `_next`.');
+			invariant(!is_null($driver), 'Implementation error: expected driving Awaitable to be set before `_produce`.');
 			return $driver;
 		})));
 	}
@@ -85,12 +70,26 @@ class Producer<+T> extends BaseProducer<T> {
 		return !$this->some_running->get();
 	}
 	
+	private function _append(AsyncIterator<T> $incoming): void {
+		$bell = $this->bell->get();
+		if(!is_null($bell) && !\HH\Asio\has_finished($bell))
+			$bell->succeed(null);
+		
+		// hopefully the ordering of these instructions doesn't matter
+		// this check wouldn't be necessary if these were pure generators, because the generators couldn't call the extender before the first `next`.
+		
+		$driver = null;
+		if(true === $this->some_running->get()->get())
+			$driver = $this->awaitify($incoming);
+		$this->racetrack->add(shape('engine' => $incoming, 'driver' => $driver));
+	}
+	
 	protected function _attach(): void {
 		// I do want to reset the value, right?
 		foreach($this->racetrack as $k => $racecar) {
 			$this->racetrack[$k]['driver'] = async {
 				$driver = $racecar['driver'];
-				if(!is_null($driver) && !$driver->getWaitHandle()->isFinished())
+				if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle()))
 					await $driver;
 				$awaited = $this->awaitify($racecar['engine']);
 				await $awaited;
@@ -98,11 +97,11 @@ class Producer<+T> extends BaseProducer<T> {
 		}
 	}
 	
-	protected async function _next(): Awaitable<?(mixed, T)> {
+	protected async function _produce(): Awaitable<?(mixed, T)> {
 		while($this->buffer->is_empty()) {
 			try {
 				$bell = $this->bell->get();
-				if(is_null($bell) || $bell->isFinished()) {
+				if(is_null($bell) || \HH\Asio\has_finished($bell)) {
 					$this->bell->set(ConditionWaitHandle::create($this->driver_lifetimes()));
 				}
 				await $this->bell->get();
@@ -409,7 +408,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 *   - There must not be a cyclic dependency.
 	 * @param $keysmith - Assign `Tk`-valued keys to `T`-valued items
 	 */
-	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
+	public function generalized_group_by<Tk as arraykey>((function(T): Traversable<Tk>) $keysmith): Producer<this> {
 		// materializing subjects out of vectors and conditions... not my proudest moment
 		$clone = clone $this;
 		$subjects = Map{}; // Map<Tk, (ConditionWaitHandle<mixed>, SplQueue<T>)>
@@ -421,37 +420,38 @@ class Producer<+T> extends BaseProducer<T> {
 			
 			// note: fail the trunk producer if this $clone value producer fails.
 			foreach($clone await as $v) {
-				$key = $keysmith($v);
-				if(!$subjects->containsKey($key)) {
-					// add emittee
-					
-					$subjects->set($key, tuple(
-						ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $self_producer }, Vector{ \HH\Asio\later() })->getWaitHandle()),
-						new \SplQueue()
-					)); // later() for just in case iterator has finished: we don't want the ConditionWaitHandle to throw.
-					$subjects[$key][1]->enqueue($v);
-					$subjects[$key][0]->succeed($v);
-					yield static::create(async {
-						while(true) {
-							while(!$subjects[$key][1]->isEmpty())
-								yield $subjects[$key][1]->dequeue();
-							
-							try {
-								await $subjects[$key][0];
-								$subjects[$key][0] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $self_producer })->getWaitHandle());
-							}
-							catch(\InvalidArgumentException $e) {
-								if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')
-									throw $e;
-								return;
-							}
-						}
-					});
-				}
-				else {
-					$subjects[$key][1]->enqueue($v);
-					if(!$subjects[$key][0]->isFinished())
+				foreach($keysmith($v) as $key) {
+					if(!$subjects->containsKey($key)) {
+						// add emittee
+						
+						$subjects->set($key, tuple(
+							ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $self_producer }, Vector{ \HH\Asio\later() })->getWaitHandle()),
+							new \SplQueue()
+						)); // later() for just in case iterator has finished: we don't want the ConditionWaitHandle to throw.
+						$subjects[$key][1]->enqueue($v);
 						$subjects[$key][0]->succeed($v);
+						yield static::create(async {
+							while(true) {
+								while(!$subjects[$key][1]->isEmpty())
+									yield $subjects[$key][1]->dequeue();
+								
+								try {
+									await $subjects[$key][0];
+									$subjects[$key][0] = ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $self_producer })->getWaitHandle());
+								}
+								catch(\InvalidArgumentException $e) {
+									if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')
+										throw $e;
+									return;
+								}
+							}
+						});
+					}
+					else {
+						$subjects[$key][1]->enqueue($v);
+						if(!\HH\Asio\has_finished($subjects[$key][0]))
+							$subjects[$key][0]->succeed($v);
+					}
 				}
 			}
 		}));
@@ -459,6 +459,11 @@ class Producer<+T> extends BaseProducer<T> {
 		invariant(!is_null($producer), 'Producer is unconditionally set just above.');
 		return $producer;
 	}
+	
+	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
+		return $this->generalized_group_by(($v) ==> [ $keysmith($v) ]);
+	}
+	
 	/**
 	 * [Periodically gather items emitted by an Observable into bundles and emit these bundles rather than emitting the items one at a time.](http://reactivex.io/documentation/operators/buffer.html)
 	 * 
