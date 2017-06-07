@@ -1,5 +1,13 @@
 {
 	"name": "hhreact/hhreactor",
+	"description": "ReactiveX operators, iterator flavor.",
+	"license": "MIT",
+	"authors": [
+		{
+			"name": "Dev",
+			"email": "dev@shufflr.io"
+		}
+	],
 	"autoload": {
 		"exclude-from-classmap": ["._"],
 		"psr-4": {

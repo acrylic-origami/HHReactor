@@ -1,7 +1,5 @@
 <?hh // strict
 namespace HHReactor\Collection;
-use HHReactor\Asio\Haltable;
-use HHReactor\Asio\HaltResult;
 class AsyncIteratorWrapper<+T> implements AsyncIterator<T> {
 	private ?Awaitable<?(mixed, T)> $handle = null;
 	public function __construct(private AsyncIterator<T> $iterator) {} // Note: cold behaviour

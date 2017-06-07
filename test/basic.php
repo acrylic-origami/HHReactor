@@ -2,7 +2,7 @@
 namespace HHReactor\Test;
 use \HHReactor\Collection\Producer;
 require_once __DIR__ . '/../vendor/hh_autoload.php';
-/* HH_IGNORE_ERROR[2012] */
+
 async function produce(): AsyncIterator<int> {
 	for($i = 0; $i < 10; $i++) {
 		yield $i;
