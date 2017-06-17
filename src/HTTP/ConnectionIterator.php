@@ -76,7 +76,4 @@ class ConnectionIterator extends BaseProducer<Connection<string>> {
 				throw new \Exception('Stream failed.'); // replace with warning capture
 		}
 	}
-	public function __destruct(): void {
-		stream_socket_shutdown($this->server, STREAM_SHUT_RD);
-	}
 }
