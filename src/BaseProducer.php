@@ -15,7 +15,7 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 		// $this->refcount->v++;
 	}
 	
-	protected function detach(): void {
+	protected function _detach(): void {
 		if($this->this_running) {
 			$this->running_count->v--;
 			if($this->running_count->get() === 0) {
@@ -27,7 +27,7 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 	abstract protected function _produce(): Awaitable<?(mixed, T)>;
 	public function __destruct(): void {
 		// $this->refcount->v--;
-		$this->detach();
+		$this->_detach();
 	}
 	public async function next(): Awaitable<?(mixed, T)> {
 		if(!$this->this_running) {

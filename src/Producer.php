@@ -58,7 +58,7 @@ class Producer<+T> extends BaseProducer<T> {
 		};
 	}
 	
-	private function driver_lifetimes(): WaitHandle<void> {
+	public function get_iterator_edge(): WaitHandle<void> {
 		return voidify(\HH\Asio\v($this->racetrack->map(($racecar) ==> {
 			$driver = $racecar['driver'];
 			invariant(!is_null($driver), 'Implementation error: expected driving Awaitable to be set before `_produce`.');
@@ -67,7 +67,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	public function is_paused(): bool {
-		return !$this->some_running->get();
+		return !$this->some_running->get()->get();
 	}
 	
 	private function _append(AsyncIterator<T> $incoming): void {
@@ -97,12 +97,25 @@ class Producer<+T> extends BaseProducer<T> {
 		}
 	}
 	
+	protected function _detach(): void {
+		parent::_detach();
+		
+		// detach from children iterators to conserve memory during pausing
+		if(false === $this->some_running->get()->get()) {
+			foreach($this->racetrack as $racecar) {
+				$engine = $racecar['engine'];
+				if($engine instanceof BaseProducer)
+					$engine->_detach();
+			}
+		}
+	}
+	
 	protected async function _produce(): Awaitable<?(mixed, T)> {
 		while($this->buffer->is_empty()) {
 			try {
 				$bell = $this->bell->get();
 				if(is_null($bell) || \HH\Asio\has_finished($bell)) {
-					$this->bell->set(ConditionWaitHandle::create($this->driver_lifetimes()));
+					$this->bell->set(ConditionWaitHandle::create($this->get_iterator_edge()));
 				}
 				await $this->bell->get();
 			}
@@ -291,6 +304,16 @@ class Producer<+T> extends BaseProducer<T> {
 					yield $v;
 				
 				$last = $v;
+			}
+		});
+	}
+	
+	public function take(int $n): this {
+		return static::create(async {
+			$i = 0;
+			foreach(clone $this await as $v) {
+				if($i++ < $n)
+					yield $v;
 			}
 		});
 	}
