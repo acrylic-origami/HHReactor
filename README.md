@@ -100,8 +100,8 @@ use HHReact\WebSocket\RFC6455;
 ### HHReactor: what's in the box
 
 - **`BaseProducer`**: manages cloning and accounting on running clones
-- **`Producer extends BaseProducer`**: merges one or more iterators into a single output stream, ReactiveX operators, and support for [arbitrary scheduling and higher-order iterators](#constructor). The &#x2B50; of the show.
-- **`ConnectionIterator extends BaseProducer`**: listens on a TCP stream for HTTP requests, parses headers, and produces streams of the request bodies
+- **`Producer extends BaseProducer`**: ReactiveX operators and support for [arbitrary scheduling and higher-order iterators](#constructor). The &#x2B50; of the show
+- **`connection_factory`**: listens on a TCP stream for HTTP requests, parses headers, and produces streams of the request bodies
 - **`Connection extends BaseProducer`**: Streams bodies from HTTP requests, and sends responses to clients
 
 ### ReactiveX operators
