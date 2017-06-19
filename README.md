@@ -124,7 +124,7 @@ If two or more scopes consume the same stream, they can either clone or not clon
 1. **If the `Producer` is cloned**, the buffer is also cloned, so consumers will receive the same elements from the moment of cloning. In this way, clones act like ReactiveX's [`Replay`](http://reactivex.io/documentation/operators/replay.html). In the language of ReactiveX, cloning "cools" the `Producer` relative to not cloning.
 2. **If the `Producer` is not cloned**, consumers all share the same buffer, and hence they compete directly for values. This approaches the "hot" Observable concept in ReactiveX, differing only in their behavior if they are not yet started: `Producer` will not start iterating its children iterators until it is itself iterated, whereas hot Observables might be running and disposing values from their children.
 
-> **Friendly note: All operators implicitly clone their operands to avoid competing with other operators or raw consumers for values.**
+> **Behavioral note: All operators implicitly clone their operands to avoid competing with other operators or raw consumers for values.**
 
 ### <a name="httpserver"></a> HTTP Server
 
@@ -135,8 +135,6 @@ If two or more scopes consume the same stream, they can either clone or not clon
 #### 2. `Connection`
 
 Proper headers will result in a `Connection` object which, as an async iterator, streams the body of the request, and also provides an async `write` method to respond to the client.
-
-> **Friendly note**: Since `connection_factory` doesn't directly produce `Connection`s but rather `Awaitable`s for them, a `Producer` wrapper of `connection_factory` _won't_ clone the output prior to emitting. This is consistent with the general behavior, but might be surprising because it's _almost_ a [`Producer` producing `Producer`s situation](#meta-producer).
 
 #### <a name="websocket"></a> `WebSocketConnection`
 
