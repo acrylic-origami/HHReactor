@@ -92,13 +92,13 @@ use HHReact\WebSocket\RFC6455;
 ### HHReactor: what's in the box
 
 - **`BaseProducer`**: manages cloning and accounting on running clones
-- **`Producer extends BaseProducer`**: merges one or more iterators into a single output stream, ReactiveX operators, and support for [arbitrary scheduling and higher-order iterators](#constructor). The &#x2; of the show.
+- **`Producer extends BaseProducer`**: merges one or more iterators into a single output stream, ReactiveX operators, and support for [arbitrary scheduling and higher-order iterators](#constructor). The &#x2B50; of the show.
 - **`ConnectionIterator extends BaseProducer`**: listens on a TCP stream for HTTP requests, parses headers, and produces streams of the request bodies
 - **`Connection extends BaseProducer`**: Streams bodies from HTTP requests, and sends responses to clients
 
 ### ReactiveX operators
 
-Most of the ReactiveX operators match the canonical signatures. See their exact signatures in `/docs/ref`.
+Most of the ReactiveX operators match the canonical signatures. The quickest way to scan the signatures is to [look at the reference documentation](#ref-doc).
 
 Major discrepancies:
 
@@ -129,6 +129,16 @@ If two or more scopes consume the same stream, they can either clone or not clon
 #### <a name="websocket"></a> `WebSocketConnection`
 
 When a WebSocket request is identified, the `Connection` object for that `Request` can be used to construct a (most likely) `RFC6455` object which subclasses `WebScoketConnection`. It handles the handshake, parses frames and produces strings from the client and and breaks out an asynchronous `write_frames` method to send string frames back to the client.
+
+### <a name="ref-doc"></a>Reference Documentation
+
+[hphpdoc](https://github.com/appertly/hphpdoc) makes reference documentation really easy to compile as needed:
+
+```bash
+$ mkdir doc
+$ ./vendor/appertly/hphpdoc/bin/hphpdoc -o doc -- src
+$ # View in browser at ./doc/index.html
+```
 
 ---
 
@@ -219,7 +229,7 @@ When disposing of `Producer`s, there are two determining factors to the iterator
 
 1. When the first item is requested from a `Producer`, it begins "running".
 2. Each `Producer` knows the number of running clones.
-3. When the count drops back to 0, the `Producer`:
+3. When the running count drops back to 0, the `Producer`:
 	1. Stops running its children;
 	2. stops buffering, and;
 	3. "detaches" from its child `Producer`s by decrementing their running refcounts.\*
