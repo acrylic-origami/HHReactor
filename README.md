@@ -6,7 +6,7 @@ $ composer require hhreactor/hhreact
 
 ### Getting started
 
-#### The what: Cloning and ReactiveX transformations on [`AsyncGenerator`]() and [`AsyncIterator`]()
+#### The what: Cloning and ReactiveX transformations on [`AsyncGenerator`](https://docs.hhvm.com/hack/async/generators#sending-and-raising) and [`AsyncIterator`](https://docs.hhvm.com/hack/async/generators#async-iterators)
 
 Hack has `AsyncGenerator`: an asynchronous version of its generators which allows for `await`s between `yield`s and exposes asynchronous `next`, `send` and `raise` for `await`ing the next result. Hack also has a broader interface `AsyncIterator` which exposes just the generator's `next` method and allows custom classes to express async iterating behavior. They are both accepted by a `foreach(<$iterator> await as $v)` loop.
 
