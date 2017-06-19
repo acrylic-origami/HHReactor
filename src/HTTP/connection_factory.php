@@ -42,7 +42,7 @@ async function iterate_header(resource $conn, int $READ_BUFFER_SIZE = 8192): Awa
 			throw new \Exception('Stream errored and closed before all headers were sent.');
 	}
 }
-async function iterate_connection(int $port, string $host = '127.0.0.1', int $READ_BUFFER_SIZE = 8192): AsyncIterator<Awaitable<Connection>> {
+async function connection_factory(int $port, string $host = '127.0.0.1', int $READ_BUFFER_SIZE = 8192): AsyncIterator<Awaitable<Connection>> {
 	set_error_handler(($errno, $errstr, $errfile, $errline, $errcontext) ==> {
 		if($errfile !== __FILE__)
 			return false;

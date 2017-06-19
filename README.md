@@ -18,9 +18,9 @@ With careful use of `ConditionWaitHandle`s, HHReactor's `Producer` is able to pa
 
 ```php
 <?hh
-// Producer and ConnectionIterator contain most of the functionality
+// Producer and connection_factory contain most of the functionality
 use HHReact\Producer; // *
-use HHReact\HTTP\ConnectionIterator; // **
+use function HHReact\HTTP\connection_factory; // **
 use HHReact\WebSocket\RFC6455;
 
 \HH\Asio\join(async {
@@ -67,20 +67,28 @@ use HHReact\WebSocket\RFC6455;
 	////////////////
 	
 	// Merge stream of requests from ports 80 and 8080
-	$http_firehose = Producer::merge(Vector{ new ConnectionIterator(80), new ConnectionIterator(8080) });
-	foreach(clone $http_firehose await as $connection) {
-		$request = $connection->get_request();
-		if($request->getHeader('Upgrade') === 'websocket') {
-			$handler = $websocket_router->route($request->getUri());
+	$http_firehose = Producer::merge(Vector{ connection_factory(80), new connection_factory(8080) });
+	foreach(clone $http_firehose await as $maybe_connection) {
+		try {
+			// try to parse headers; fail if client fails to send them all
+			$connection = await $maybe_connection;
 			
-			// wrap the connection object in a `WebSocketConnection` to
-			//  handle handshake and websocket frames
-			$handler(new RFC6455($connection))
+			$request = $connection->get_request();
+			if($request->getHeader('Upgrade') === 'websocket') {
+				$handler = $websocket_router->route($request->getUri());
+				
+				// wrap the connection object in a `WebSocketConnection` to
+				//  handle handshake and websocket frames
+				$handler(new RFC6455($connection))
+			}
+			else {
+				// non-websocket requests
+				$handler = $router->route($request->getMethod(), $request->getUri());
+				$handler($connection); // stream the rest of the body (if there is one)
+			}
 		}
-		else {
-			// non-websocket requests
-			$handler = $some_router->route($request->getMethod(), $request->getUri());
-			$handler($connection); // stream the rest of the body (if there is one)
+		catch(\Exception $e) {
+			
 		}
 	}
 	
@@ -105,7 +113,7 @@ Major discrepancies:
 1. [**`debounce` operator**](https://github.com/acrylic-origami/HHReactor/issues/1): not yet implemented due to technical challenges, but high on the priority list.
 2. **`defer` operator**: no strong motivation to implement it.
 3. **`never` operator**: non-terminating, lazy `Awaitable`s and `AsyncIterator`s are impossible in Hack (right now anyways; 2017-06-17)
-4. **Order preservation where natural**, e.g. in `map`, `reduce`, and `filter`. The Hack spec doesn't protect against extremely pathological race conditions, where the _single_ arc from an iterator yielding into a `Producer`'s buffer is overtaken by the cascade of arcs to restart the iterator from another scope, obtain the next value then put it in the shared buffer. As of HHVM 3.19, it doesn't look like the actual async implementation allows this, but without specification, ordering sadly can't be guaranteed.
+4. **Order preservation where natural**, e.g. in `map`, `reduce`, and `filter`. The Hack spec doesn't protect against extremely pathological race conditions, where the _single_ arc from an iterator yielding into a `Producer`'s buffer is overtaken by the cascade of arcs to restart the iterator from another scope, obtain the next value then put it in the shared buffer. As of HHVM 3.19, it doesn't look like the actual async implementation allows this, but without specification, order preservation sadly can't be guaranteed.
 
 ### Properties of `Producer`
 
@@ -118,13 +126,17 @@ If two or more scopes consume the same stream, they can either clone or not clon
 
 > **Friendly note: All operators implicitly clone their operands to avoid competing with other operators or raw consumers for values.**
 
-### HTTP Server
+### <a name="httpserver"></a> HTTP Server
 
-#### <a name="httpserver"></a> `ConnectionIterator` and `Connection`
+#### 1. `connection_factory`
 
-`ConnectionIterator` starts an HTTP server upon construction, accepts connections through a TCP socket, parses headers and produces a _stream_ of the _body_ of the request through a `Connection` object. Each requeset is represented by exactly one `Connection` object which also accepts raw string responses via `write` or PSR-7 `Response` &mdash; just the headers and body for the timebeing (2017-06-16).
+`connection_factory` starts an HTTP server when called, accepts connections through a TCP socket. It accepts each connection and offloads the work to a separate async function to parse the headers, hence it produces an `Awaitable` that will fail if the headers are incomplete when the stream closes. 
 
-> **Friendly note**: `Connection`s are automatically cloned as they are produced, so every consumer gets not only the same `Connection` objects, but also the same bodies. This is the `Replay` behavior mentioned earlier at work, and the cloning comes from a general behavior: this being one instance where a `Producer` produces `Producer`s.
+#### 2. `Connection`
+
+Proper headers will result in a `Connection` object which, as an async iterator, streams the body of the request, and also provides an async `write` method to respond to the client.
+
+> **Friendly note**: Since `connection_factory` doesn't directly produce `Connection`s but rather `Awaitable`s for them, a `Producer` wrapper of `connection_factory` _won't_ clone the output prior to emitting. This is consistent with the general behavior, but might be surprising because it's _almost_ a [`Producer` producing `Producer`s situation](#meta-producer).
 
 #### <a name="websocket"></a> `WebSocketConnection`
 
@@ -234,14 +246,4 @@ See 1. `Producer::_attach`; 2. `BaseProducer::running_count`, `BaseProducer::thi
 
 <sup>\*A `Producer` knows it holds running references to all of its children because, as part of its setup routine, `Producer` must start iterating them all.</sup>
 
-While `ConnectionIterator` does stop _buffering_, **it doesn't close the TCP socket** when its running refcount drops to 0, so the system queue for that socket begins to fill instead. Again, HHReactor leans on the garbage collector to close these sockets, and only when _all_ references to the `ConnectionIterator` are dropped (not just running ones).
-
-<!-- Discuss `ConditionWaitHandle` argument and the lack of infinite Awaitable that makes this unsound -->
-
-<!-- Discuss racetrack, racecars and resource management by BaseProducer -->
-
-<!-- ### <a name="why-clone-producers"></a> Why the need to clone `Producer`s?
-
-`Producer`s wrap `AsyncIterator`s at their core. These iterators may be out of sync with the consumers of a `Producer` by any number of elements, so each instance of `Producer` tracks its lag and catches its consumer up when it regains control. However, note that the lag is a single queue, and if many consumers try to consume a single instance of `Producer`, they race against each other to consume the lag. Multicasting a `Producer` also damages the timing of the `Producer` because of the way it is implemented (it informs its consumers lazily). These race conditions can end a `Producer` prematurely.
-
-<sup>Nasty bugs during development have come from operators not cloning the incoming producers. If you see something along the lines of `foreach($this await as ...)` over `foreach(clone $this await as ...)`, please kindly report it in an issue.</sup> -->
+A `connection_factory` iterator wrapped by a `Producer` would stop _buffering_, but **it wouldn't close the TCP socket** until its _refcount_ drops to 0, so the system queue for that socket might begin to fill instead. Again, HHReactor leans on the garbage collector to close these sockets, and only when _all_ references to the `connection_factory` iterator are dropped (not just running ones).
