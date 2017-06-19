@@ -1,48 +1,81 @@
 <?hh // strict
 namespace HHReactor\HTTP;
 
-use HHReactor\BaseProducer;
+use HHReactor\Producer;
 use HHReactor\Wrapper;
 use HHReactor\Collection\Queue;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 
-abstract class Connection<+TStream as \Stringish> extends BaseProducer<TStream> implements IConnection<TStream> {
+abstract class Connection extends Producer<string> {
+	const READ_BUFFER_SIZE = 8192;
+	
 	public function __construct(
-		private Request $request,
-		protected resource $connection) {
-		// If I want this to be protected but other BaseProducer-children to maybe have public constructors, then I've gotta do this in each one. Kind of a pain, but (shrug emoji)
-		$this->buffer = new Queue();
-		$this->running_count = new Wrapper(0);
-		// $this->refcount = new Wrapper(1);
-		$this->some_running = new Wrapper(new Wrapper(false));
-		
-	}
-	
-	public function _attach(): void {}
-	
-	public function close(): void {}
-	
-	public async function get_bytes(int $chunk_size): Awaitable<string> {
-		$buffer = '';
-		$next = '';
-		while(strlen($buffer) < $chunk_size) { // includes negative
-			$next = await $this->next();
-			if(is_null($next)) {
-				list($_, $caller) = debug_backtrace(0);
-				throw new \RuntimeException(sprintf('Failed to fetch %d bytes for %s', $chunk_size, $caller));
+		protected Request $request,
+		private resource $stream
+	) {
+		parent::__construct(Vector{ async ($_) ==> {
+			for(
+				$status = await stream_await($stream, STREAM_AWAIT_READ, 0.0);
+				$status === STREAM_AWAIT_READY;
+				$status = await stream_await($stream, STREAM_AWAIT_READ, 0.0)
+			) {
+				yield fread($stream, self::READ_BUFFER_SIZE);
 			}
-			else
-				$buffer .= $next[1];
+				
+			if($status !== STREAM_AWAIT_CLOSED)
+				throw new \Exception('Stream failed.');
+		} });
+	}
+	
+	public async function get_bytes(int $num_bytes): Awaitable<string> {
+		$ret = '';
+		for(
+			$ret = $next = '';
+			strlen($ret) < $num_bytes && !is_null($next);
+			$ret .= $next
+		) {}
+			
+		if(strlen($ret) < $num_bytes)
+			throw new \LengthException("Stream closed before $num_bytes could be extracted.");
+		else
+			return $ret;
+	}
+	
+	public function close(): void {
+		// questioning if I should even break this method out, or if I should let the GC do the work and let functions fail
+		socket_close($this->stream);
+	}
+	
+	public async function write(string $response): Awaitable<int> {
+		$pos = 0;
+		do {
+			$status = await stream_await($this->stream, STREAM_AWAIT_WRITE, 0.0);
+			if(STREAM_AWAIT_READY === $status) {
+				do {
+					// var_dump(substr($response, $pos, self::READ_BUFFER_SIZE));
+					$bytes_written = fwrite($this->stream, substr($response, $pos, self::READ_BUFFER_SIZE));
+					$pos += $bytes_written;
+				}
+				while($bytes_written > 0 && $pos < strlen($response));
+				
+				if($pos === strlen($response))
+					return $pos;
+			}
 		}
-		return $buffer; // may be > $chunk_size
+		while(STREAM_AWAIT_READY === $status);
+		
+		switch($status) {
+			case STREAM_AWAIT_CLOSED:
+				return $pos;
+			case STREAM_AWAIT_TIMEOUT:
+			// FALLTHROUGH
+			case STREAM_AWAIT_ERROR:
+				throw new \Exception('Stream failed.'); // replace with warning capture
+		}
 	}
 	
-	public function get_request(): Request {
-		return $this->request;
-	}
-	
-	public function respond(Response $response): Awaitable<bool> {
+	public async function respond(Response $response): Awaitable<bool> {
 		$response_str = '';
 		
 		$response_str .= sprintf(
@@ -57,34 +90,11 @@ abstract class Connection<+TStream as \Stringish> extends BaseProducer<TStream> 
 		);
 		$response_str .= $response->getBody();
 		
-		return $this->write($response_str);
+		$bytes_written = await $this->write($response_str);
+		return $bytes_written === strlen($response_str);
 	}
 	
-	public async function write(string $response): Awaitable<bool> {
-		$pos = 0;
-		do {
-			$status = await stream_await($this->connection, STREAM_AWAIT_WRITE, 0.0);
-			if(STREAM_AWAIT_READY === $status) {
-				do {
-					var_dump(substr($response, $pos, ConnectionIterator::READ_BUFFER_SIZE));
-					$bytes_written = fwrite($this->connection, substr($response, $pos, ConnectionIterator::READ_BUFFER_SIZE));
-					$pos += $bytes_written;
-				}
-				while($bytes_written > 0 && $pos < strlen($response));
-				
-				if($pos === strlen($response))
-					return true;
-			}
-		}
-		while(STREAM_AWAIT_READY === $status);
-		
-		switch($status) {
-			case STREAM_AWAIT_CLOSED:
-				return false;
-			case STREAM_AWAIT_TIMEOUT:
-			// FALLTHROUGH
-			case STREAM_AWAIT_ERROR:
-				throw new \Exception('Stream failed.'); // replace with warning capture
-		}
+	public function get_request(): Request {
+		return $this->request;
 	}
 }

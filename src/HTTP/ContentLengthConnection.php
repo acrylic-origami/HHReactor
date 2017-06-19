@@ -3,37 +3,27 @@ namespace HHReactor\HTTP;
 
 use GuzzleHttp\Psr7\Request;
 
-class ContentLengthConnection extends Connection<string> {
+class ContentLengthConnection extends Connection {
 	public function __construct(
 		Request $request,
-		resource $connection,
+		resource $stream,
 		private int $remaining_length,
-		private string $initial
-		) {
-		parent::__construct($request, $connection);
+		private string $initial) {
+		parent::__construct($request, $stream);
 	}
-	
-	public async function _produce(): Awaitable<?(mixed, string)> {
-		if($this->initial !== '') {
-			$initial = $this->initial;
+	<<__Override>>
+	protected async function _produce(): Awaitable<?(mixed, string)> {
+		$initial = $this->initial;
+		if($initial !== '') {
 			$this->initial = '';
-			return tuple(null, substr($initial, 0, strlen($initial) + $this->remaining_length)); // reconstruct content-length
+			return tuple(null, $initial);
 		}
-		if($this->remaining_length > 0) {
-			$status = await stream_await($this->connection, STREAM_AWAIT_READ, 0.0);
-			switch($status) {
-				case STREAM_AWAIT_READY:
-					$incoming = fread($this->connection, min(ConnectionIterator::READ_BUFFER_SIZE, $this->remaining_length));
-					$this->remaining_length -= strlen($incoming);
-					return tuple(null, $incoming);
-				case STREAM_AWAIT_CLOSED:
-					return null;
-				case STREAM_AWAIT_TIMEOUT:
-				// FALLTHROUGH
-				case STREAM_AWAIT_ERROR:
-					throw new \Exception('Stream failed.'); // replace with warning capture
-			}
+		elseif($this->remaining_length > 0) {
+			$next = await parent::_produce();
+			$this->remaining_length -= strlen($next);
+			return $next;
 		}
-		return null;
+		else
+			return null;
 	}
 }

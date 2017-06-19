@@ -12,19 +12,20 @@ class RFC6455 extends WebSocketConnection {
 	const int CONT_FRAME_OPCODE = 0x00;
 	const int TEXT_FRAME_OPCODE = 0x01;
 	const int BIN_FRAME_OPCODE = 0x02;
+	const int CLOSE_FRAME_OPCODE = 0x08;
 	const int PING_FRAME_OPCODE = 0x09;
 	const int PONG_FRAME_OPCODE = 0x0A;
 	const int END_FRAME = 0x80800000; // FIN + Cont + Masked with zeroes, no body
 	
-	public function __construct(Connection<string> $tap) {
-		parent::__construct($tap);
+	public function __construct(Connection $connection) {
+		$this->connection = clone $connection;
 		
 		$lowercase_headers = Map{};
-		foreach($this->tap->get_request()->getHeaders() as $k => $header) 
+		foreach($this->connection->get_request()->getHeaders() as $k => $header) 
 			$lowercase_headers[strtolower($k)] = $header;
 		
 		$sec_websocket_accept = base64_encode(sha1(sprintf('%s%s', $lowercase_headers['sec-websocket-key'], self::GUID)));
-		$response_status = \HH\Asio\join($this->tap->respond(new Response(
+		$response_status = \HH\Asio\join($this->connection->respond(new Response(
 			101,
 			[
 				'Upgrade' => 'websocket',
@@ -38,16 +39,12 @@ class RFC6455 extends WebSocketConnection {
 	
 	public function _attach(): void {}
 	
-	public function close(): void {
-		$this->tap->close();
-	}
-	
-	public function respond(Response $response): Awaitable<bool> {
-		return $this->tap->respond($response);
-	}
-	
-	public function write(string $data): Awaitable<bool> {
-		return $this->tap->write($data);
+	public async function close(string $reason): Awaitable<bool> {
+		$num_frames_sent = await $this->send_frames(async {
+			yield $reason;
+		}, self::CLOSE_FRAME_OPCODE);
+		$this->connection->close();
+		return $num_frames_sent > 0;
 	}
 	
 	public async function send_frames(AsyncIterator<string> $frames, int $opcode = self::TEXT_FRAME_OPCODE): Awaitable<int> {
@@ -74,11 +71,11 @@ class RFC6455 extends WebSocketConnection {
 			for($i = 0; $i < strlen($frame); $i++)
 				$body .= ord($frame[$i]) ^ $masking_key[$i % 4];
 			
-			$write_status = await $this->write($first_byte . $payload_len . $masking_key . $body);
+			$write_status = await $this->connection->write($first_byte . $payload_len . $masking_key . $body);
 			$i += intval($write_status);
 		}
 		
-		await $this->write(pack('J', self::END_FRAME));
+		await $this->connection->write(pack('J', self::END_FRAME));
 		return $i;
 	}
 	
@@ -86,7 +83,7 @@ class RFC6455 extends WebSocketConnection {
 		$header = $this->frame_buffer;
 		$this->frame_buffer = '';
 		
-		$header .= await $this->tap->get_bytes(4 - strlen($header)); // wait for first four bytes, which give fin, RSVs, opcodes, preliminary payload length and either part of the mask key, the extended payload length or part of the very extended payload length
+		$header .= await $this->connection->get_bytes(4 - strlen($header)); // wait for first four bytes, which give fin, RSVs, opcodes, preliminary payload length and either part of the mask key, the extended payload length or part of the very extended payload length
 		// if(strlen($header) < 4)
 		// 	throw new \RuntimeException('Stream ended prematurely when building frame');
 		
@@ -102,7 +99,7 @@ class RFC6455 extends WebSocketConnection {
 		switch(127 - $payload_len) {
 			case 0:
 				// read for 64 bits of length
-				$header .= await $this->tap->get_bytes(6 - strlen($header));
+				$header .= await $this->connection->get_bytes(6 - strlen($header));
 				// if(strlen($header) < 10)
 				// 	throw new \RuntimeException('Stream ended prematurely when building frame');
 				
@@ -119,12 +116,12 @@ class RFC6455 extends WebSocketConnection {
 				$mask_key = substr($header, 2);
 				break;
 		}
-		$mask_key .= await $this->tap->get_bytes(4 - strlen($mask_key));
+		$mask_key .= await $this->connection->get_bytes(4 - strlen($mask_key));
 		// if(strlen($header) < 4)
 		// 	throw new \RuntimeException('Stream ended prematurely when building frame');
 		
 		$body = substr($mask_key, 4);
-		$body .= await $this->tap->get_bytes($payload_len - strlen($body));
+		$body .= await $this->connection->get_bytes($payload_len - strlen($body));
 		
 		// if(strlen($body) < $payload_len)
 		// 	throw new \RuntimeException('Stream ended before sending full frame body');

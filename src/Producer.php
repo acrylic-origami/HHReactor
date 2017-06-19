@@ -5,15 +5,13 @@ use HHReactor\Collection\EmptyAsyncIterator;
 use HHReactor\Collection\Queue;
 use function HHReactor\Asio\voidify;
 newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable<mixed>);
-
-<<__ConsistentConstruct>>
 /**
  * An mergeable and shareable wrapper of multiple `AsyncIterator`.
  */
 class Producer<+T> extends BaseProducer<T> {
 	private Wrapper<?ConditionWaitHandle<mixed>> $bell;
 	private Vector<Racecar<T>> $racetrack;
-	final protected function __construct(Vector<(function(Appender<T>): AsyncIterator<T>)> $generator_factories) {
+	protected function __construct(Vector<(function(Appender<T>): AsyncIterator<T>)> $generator_factories) {
 		// If I want this to be protected but other BaseProducer-children to maybe have public constructors, then I've gotta do this in each one. Kind of a pain, but (shrug emoji)
 		$this->buffer = new Queue();
 		$this->running_count = new Wrapper(0);
@@ -125,8 +123,8 @@ class Producer<+T> extends BaseProducer<T> {
 	/**
 	 * Wrap an `AsyncIterator` in a `Producer` (static type), reproducing values from it
 	 */
-	final public static function create(AsyncIterator<T> $incoming): this {
-		return new static(Vector{ ($_) ==> $incoming });
+	final public static function create(AsyncIterator<T> $incoming): Producer<T> {
+		return new self(Vector{ ($_) ==> $incoming });
 	}
 	
 	/**
@@ -139,15 +137,15 @@ class Producer<+T> extends BaseProducer<T> {
 	/**
 	 * `just` equivalent for `Awaitable` {@see \HHReactor\Producer::just()}
 	 */
-	final public static function create_from_awaitable(Awaitable<T> $awaitable): this {
+	final public static function create_from_awaitable(Awaitable<T> $awaitable): Producer<T> {
 		return self::create_from_awaitables(Vector{ $awaitable });
 	}
 	
 	/**
 	 * Race a collection of `Awaitable`s in parallel and stream the outputs as they resolve
 	 */
-	final public static function create_from_awaitables(Vector<Awaitable<T>> $awaitables): this {
-		return new static(
+	final public static function create_from_awaitables(Vector<Awaitable<T>> $awaitables): Producer<T> {
+		return new self(
 			$awaitables->map(($awaitable) ==> (async ($_) ==> {
 				$v = await $awaitable;
 				yield $v;
@@ -244,7 +242,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 * **Specs**
 	 * - The return value may produce at most `$n` values, but must include all items produced since the beginning of the call or `$n` values, whichever is smaller.
 	 */
-	public function take(int $n): this {
+	public function take(int $n): Producer<T> {
 		return static::create(async {
 			$i = 0;
 			foreach(clone $this await as $v) {
@@ -322,7 +320,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 */
 	public function switch_on_next<Tv>((function(T): Producer<Tv>) $meta): Producer<Tv> {
 		$clone = clone $this;
-		return new static(
+		return new self(
 			Vector{ ($appender) ==> 
 				new DelayedEmptyAsyncIterator(async {
 					$current_idx = new Wrapper(-1);
@@ -348,7 +346,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 * - Any items produced after the beginning call in the original Producer must be produced by exactly one of the `this`-typed Producers in the return value.
 	 * @param $keysmith - Assign `Tk`-valued keys to `T`-valued items
 	 */
-	public function generalized_group_by<Tk as arraykey>((function(T): Traversable<Tk>) $keysmith): Producer<this> {
+	public function generalized_group_by<Tk as arraykey>((function(T): Traversable<Tk>) $keysmith): Producer<Producer<T>> {
 		// materializing subjects out of vectors and conditions... not my proudest moment
 		$clone = clone $this;
 		$subjects = Map{}; // Map<Tk, (ConditionWaitHandle<mixed>, SplQueue<T>)>
@@ -400,7 +398,7 @@ class Producer<+T> extends BaseProducer<T> {
 		return $producer;
 	}
 	
-	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<this> {
+	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<Producer<T>> {
 		return $this->generalized_group_by(($v) ==> [ $keysmith($v) ]);
 	}
 	
@@ -428,17 +426,17 @@ class Producer<+T> extends BaseProducer<T> {
 	 * @param $usecs - The "timespan" as described above, in microseconds.
 	 */
 	
-	// public function debounce(int $usecs): this {
+	// public function debounce(int $usecs): Producer<T> {
 	// 	$clone = clone $this;
-	// 	return new static(Vector{ ($appender) ==> {
+	// 	return new self(Vector{ ($appender) ==> {
 	// 		foreach()
 	// 	} })
 	// }
 	
-	// public function debounce(int $usecs): this {
+	// public function debounce(int $usecs): Producer<T> {
 	// 	$clone = clone $this;
 	// 	$extendable = new Wrapper(new Extendable($clone->next()));
-	// 	return new static(($appender) ==> Vector{
+	// 	return new self(($appender) ==> Vector{
 	// 		async {
 	// 			$first_vec = await $extendable->get();
 	// 			$k_v = $first_vec->lastValue();
@@ -470,7 +468,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 * @param $signal - Produce a value whenever a new window opens.
 	 * @return - Produce Producers that group values from the original into windows dictated by `$signal`.
 	 */
-	public function window(Producer<mixed> $signal): Producer<this> {
+	public function window(Producer<mixed> $signal): Producer<Producer<T>> {
 		$clone = clone $this;
 		$signal_clone = clone $signal;
 		return static::create_producer(async {
@@ -528,15 +526,15 @@ class Producer<+T> extends BaseProducer<T> {
 	 * 
 	 * Note: very likely to, but _might_ not terminate immediately.
 	 */
-	public static function empty(): this {
+	public static function empty(): Producer<T> {
 		return static::create(new EmptyAsyncIterator());
 	}
 	
 	/**
 	 * [Create an Producer that emits no items and terminates with an error](http://reactivex.io/documentation/operators/empty-never-throw.html)
 	 */
-	public static function throw(\Exception $e): this {
-		return new static(async {
+	public static function throw(\Exception $e): Producer<T> {
+		return new self(async {
 			throw $e;
 		});
 	}
@@ -558,7 +556,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 * 
 	 * Note: very likely to, but _might_ not terminate immediately.
 	 */
-	public static final function just(T $v): this {
+	public static final function just(T $v): Producer<T> {
 		return static::create(async {
 			yield $v;
 		});
@@ -583,7 +581,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 * @param $v The value to repeat
 	 * @param $n Nullable number of repeats; null will continue forever
 	 */
-	public static final function repeat(T $v, ?int $n = null): this {
+	public static final function repeat(T $v, ?int $n = null): Producer<T> {
 		return static::create(async {
 			for(; is_null($n) || $n > 0; !is_null($n) && $n--) {
 				yield $v;
@@ -598,7 +596,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 * @param $v The value to repeat
 	 * @param $n Nullable number of repeats; null will continue forever
 	 */
-	public static final function repeat_sequence(Traversable<T> $vs, ?int $n = null): this {
+	public static final function repeat_sequence(Traversable<T> $vs, ?int $n = null): Producer<T> {
 		return static::create(async {
 			for(; is_null($n) || $n > 0; !is_null($n) && $n--) {
 				foreach($vs as $v) {
@@ -611,7 +609,7 @@ class Producer<+T> extends BaseProducer<T> {
 	/**
 	 * [Create an Producer that emits a particular item after a given delay](http://reactivex.io/documentation/operators/timer.html)
 	 */
-	public final static function timer(T $v, int $delay): this {
+	public final static function timer(T $v, int $delay): Producer<T> {
 		return static::create(async {
 			await \HH\Asio\usleep($delay);
 			yield $v;
@@ -620,7 +618,7 @@ class Producer<+T> extends BaseProducer<T> {
 	/**
 	 * [Convert a collection of `Awaitable` items to a `Producer`](http://reactivex.io/documentation/operators/from.html)
 	 */
-	public final static function from(Iterable<Awaitable<T>> $subawaitables): this {
+	public final static function from(Iterable<Awaitable<T>> $subawaitables): Producer<T> {
 		return static::create(async {
 			foreach($subawaitables as $v) {
 				$v = await $v;
@@ -633,8 +631,8 @@ class Producer<+T> extends BaseProducer<T> {
 	 * 
 	 * Note: `merge` has no ordering guarantees, especially between the iterators, and potentially even for items within a given iterator.
 	 */
-	public final static function merge(Vector<AsyncIterator<T>> $producers): this {
-		return new static($producers->map(($producer) ==> ($_) ==> $producer));
+	public final static function merge(Vector<AsyncIterator<T>> $producers): Producer<T> {
+		return new self($producers->map(($producer) ==> ($_) ==> $producer));
 	}
 	/**
 	 * [Combine the emissions of multiple Producers together via a specified function and emit single items for each combination based on the results of this function.](http://reactivex.io/documentation/operators/zip.html)
@@ -663,7 +661,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 */
 	public static function combine_latest<Tu, Tv, Tx>(Producer<Tu> $A, Producer<Tv> $B, (function(Tu, Tv): Tx) $combiner): Producer<Tx> {
 		$latest = tuple(null, null);
-		return new static(Vector{
+		return new self(Vector{
 			async ($appender) ==>  {
 				foreach(clone $A await as $v) {
 					$latest[0] = $v;
@@ -688,7 +686,7 @@ class Producer<+T> extends BaseProducer<T> {
 		// ..gggghhhhhaaah...
 		$latest_timer = tuple(async {}, async {});
 		$latest = tuple(null, null);
-		return new static(
+		return new self(
 			Vector{
 				async ($appender) ==> {
 					foreach(clone $A await as $u) {
