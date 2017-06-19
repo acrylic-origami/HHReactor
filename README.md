@@ -184,13 +184,9 @@ Producer<T>::__construct(
 
 Without using the appender, the constructor for the `Producer` will merge the value streams from the generating functions into a common output. `merge` is implemented [exactly that way](https://github.com/acrylic-origami/HHReactor/blob/1c9302cfe3574780a2e1531674998fa70bd26083/src/Producer.php#L647) in fact!
 
-For higher-order `Producer`s like `Producer<Producer<T>>`, **outer `Producer`s will automatically clone the inner `Producer`s as they're yielded**. Cloning `Producer` is cheap and [crucial](#why-clone-producers), and while `Producer`s can't know to clone themselves when needed, the implementation tries to help where it can.
+> **Friendly note:** For higher-order `Producer`s like `Producer<Producer<T>>`, outer `Producer`s **will not** automatically clone the inner `Producer`s as they're yielded. This is less restrictive but could be surprising: clones of the outer producer will produce identical inner `Producer`s which will be **hot**, so their consumers will compete for values, even though the outer producer is cold.
 
 #### Running, pausing and exiting early
-
-<!-- As of 3.19, at its core, all async behavior comes from some combination of: a [Hack async extension](https://docs.hhvm.com/hack/async/extensions) (MySQL, curl, etc.), an async `usleep` handle, or a `later` handle. It's really whatever HHVM has [named `WaitHandle`s for](https://github.com/facebook/hhvm/blob/6b38ff89cdc2720221bd5766d8d64b7d906b9388/hphp/hack/hhi/classes.hhi#L109). Hack makes no guarantees about what happens if you make one of these `WaitHandle`s but don't `await` it right away.
-
-Upon construction, a `Producer` that wraps an `AsyncGenerator` won't start the underlying function until the first `next` call, preserving the `AsyncGenerator`'s behavior. Therefore, the above isn't a problem right at the outset. -->
 
 **The how**
 

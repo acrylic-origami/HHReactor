@@ -12,7 +12,6 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 	
 	public function __clone(): void {
 		$this->buffer = clone $this->buffer;
-		// $this->refcount->v++;
 	}
 	
 	protected function _detach(): void {
@@ -43,14 +42,12 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 		else
 			$ret = await $this->_produce();
 		
-		if(!is_null($ret) && $ret[1] instanceof BaseProducer) // for Producer<Producer<T>>s
-			return tuple(null, clone $ret[1]);
-		else
-			return $ret;
+		// if(!is_null($ret) && $ret[1] instanceof BaseProducer) // for Producer<Producer<T>>s
+		// 	return tuple(null, clone $ret[1]);
+		// else
+		// 	return $ret;
+		
+		// having second thoughts about cloning higher-order producers, so for now let's not
+		return $ret;
 	}
-	// /* HH_FIXME[4120] Object-protected uses only */
-	// protected function soft_next(AsyncCondition<?BaseProducer<T>> $condition): Awaitable<?(mixed, T)> {
-	// 	// not super keen on this being in the parent class... but for now it's the most convenient
-	// 	return $this->next();
-	// }
 }
