@@ -30,16 +30,24 @@ class Producer<+T> extends BaseProducer<T> {
 	private function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
 		$stashed_some_running = $this->some_running->get();
 		return async {
-			foreach($incoming await as $v) {
+			do {
+				$v = await \HH\Asio\wrap($incoming->next());
 				$bell = $this->bell->get();
 				if(!is_null($bell) && !\HH\Asio\has_finished($bell))
 					$bell->succeed(null);
 				
-				$this->buffer->add($v);
+				if($v->isFailed() || !is_null($v->getResult()))
+					/* HH_FIXME[4110] is_null on result not sufficient to refine ResultOrExceptionWrapper<?T> to ResultOrExceptionWrapper<T> */
+					$this->buffer->add($v);
+				
+				if($v->isFailed() || is_null($v->getResult()))
+					return; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
+					
 				if(false === $stashed_some_running->get()) {
 					return;
 				}
 			}
+			while(!$v->isFailed() && !is_null($v));
 		};
 	}
 	
@@ -117,7 +125,7 @@ class Producer<+T> extends BaseProducer<T> {
 				}
 			}
 		}
-		return tuple(null, $this->buffer->shift());
+		return $this->buffer->shift()->getResult();
 	}
 	
 	/**
@@ -177,7 +185,7 @@ class Producer<+T> extends BaseProducer<T> {
 		while(!$this->buffer->is_empty()) {
 			$next = $this->buffer->shift();
 			if(!is_null($next))
-				yield $next;
+				yield $next->getResult()[1];
 		}
 	}
 	

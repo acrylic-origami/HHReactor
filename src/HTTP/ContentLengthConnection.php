@@ -20,8 +20,12 @@ class ContentLengthConnection extends Connection {
 		}
 		elseif($this->remaining_length > 0) {
 			$next = await parent::_produce();
-			$this->remaining_length -= strlen($next);
-			return $next;
+			if(is_null($next))
+				return null;
+			else {
+				$this->remaining_length -= strlen($next[1]);
+				return $next;
+			}
 		}
 		else
 			return null;

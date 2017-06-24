@@ -8,7 +8,7 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 	private bool $this_running = false;
 	protected Wrapper<Wrapper<bool>> $some_running;
 	/* HH_FIXME[4120] Use only in object-protected ways. */
-	protected Collection\Queue<T> $buffer;
+	protected Collection\Queue<\HH\Asio\ResultOrExceptionWrapper<(mixed, T)>> $buffer;
 	
 	public function __clone(): void {
 		$this->buffer = clone $this->buffer;
@@ -37,10 +37,9 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 			}
 			$this->running_count->v++;
 		}
-		if(!$this->buffer->is_empty())
-			$ret = tuple(null, $this->buffer->shift());
-		else
-			$ret = await $this->_produce();
+		
+		$next = await $this->_produce();
+		return $next;
 		
 		// if(!is_null($ret) && $ret[1] instanceof BaseProducer) // for Producer<Producer<T>>s
 		// 	return tuple(null, clone $ret[1]);
@@ -48,6 +47,5 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 		// 	return $ret;
 		
 		// having second thoughts about cloning higher-order producers, so for now let's not
-		return $ret;
 	}
 }
