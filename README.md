@@ -1,7 +1,7 @@
 ## HHReactor &mdash; cloneable, immutable streams and ReactiveX operators for strict Hack
 
 ```
-$ composer require hhreactor/hhreact
+$ composer require hhreact/hhreactor
 ```
 
 ### Getting started
