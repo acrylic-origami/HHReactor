@@ -52,6 +52,13 @@ use HHReact\WebSocket\RFC6455;
 	// Note that Producer wraps transparently:
 	foreach(clone $producer await as $item) { /* same items as $iter_numbers */ }
 	
+	////////////////
+	// ** HTTP ** //
+	////////////////
+	
+	// Merge stream of requests from ports 80 and 8080
+	$http_firehose = Producer::merge(Vector{ connection_factory(80), new connection_factory(8080) });
+	
 	// To cancel/dispose, just use what the language gives you: `break`, `return` and `throw`;
 	//  the iterating scope is in full control.
 	foreach(clone $http_firehose await as $connection) {
@@ -62,12 +69,7 @@ use HHReact\WebSocket\RFC6455;
 		//  happens when you cancel a Producer partway
 	}
 	
-	////////////////
-	// ** HTTP ** //
-	////////////////
-	
-	// Merge stream of requests from ports 80 and 8080
-	$http_firehose = Producer::merge(Vector{ connection_factory(80), new connection_factory(8080) });
+	// If you're up for it, do something more interesting than quitting immediately
 	foreach(clone $http_firehose await as $maybe_connection) {
 		try {
 			// try to parse headers; fail if client fails to send them all
