@@ -4,7 +4,7 @@ use HHReactor\Asio\DelayedEmptyAsyncIterator;
 use HHReactor\Collection\EmptyAsyncIterator;
 use HHReactor\Collection\Queue;
 use function HHReactor\Asio\voidify;
-newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable<mixed>);
+newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?WaitHandle<mixed>);
 /**
  * An mergeable and shareable wrapper of multiple `AsyncIterator`.
  */
@@ -27,38 +27,38 @@ class Producer<+T> extends BaseProducer<T> {
 		$this->_append(new DelayedEmptyAsyncIterator($incoming));
 	}
 	
-	private function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
+	private async function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
 		$stashed_some_running = $this->some_running->get();
-		return async {
-			do {
-				$v = await \HH\Asio\wrap($incoming->next());
-				$bell = $this->bell->get();
-				if(!is_null($bell) && !\HH\Asio\has_finished($bell))
-					$bell->succeed(null);
+		do {
+			$v = await \HH\Asio\wrap($incoming->next());
+			$bell = $this->bell->get();
+			if(!is_null($bell) && !\HH\Asio\has_finished($bell))
+				$bell->succeed(null);
+			
+			if($v->isFailed() || !is_null($v->getResult()))
+				/* HH_FIXME[4110] is_null on result not sufficient to refine ResultOrExceptionWrapper<?T> to ResultOrExceptionWrapper<T> */
+				$this->buffer->add($v);
+			
+			if($v->isFailed() || is_null($v->getResult()))
+				return; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
 				
-				if($v->isFailed() || !is_null($v->getResult()))
-					/* HH_FIXME[4110] is_null on result not sufficient to refine ResultOrExceptionWrapper<?T> to ResultOrExceptionWrapper<T> */
-					$this->buffer->add($v);
-				
-				if($v->isFailed() || is_null($v->getResult()))
-					return; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
-					
-				if(false === $stashed_some_running->get()) {
-					return;
-				}
+			if(false === $stashed_some_running->get()) {
+				return;
 			}
-			while(!$v->isFailed() && !is_null($v));
-		};
+		}
+		while(!$v->isFailed() && !is_null($v));
 	}
 	
 	public function get_iterator_edge(): WaitHandle<void> {
-		return voidify(\HH\Asio\v($this->racetrack->mapWithKey(($k, $racecar) ==> {
-			$driver = $racecar['driver'];
-			if(is_null($driver))
-				return ($this->racetrack[$k]['driver'] = $this->awaitify($racecar['engine']));
-			else
-				return $driver;
-		})));
+		// MUST be plain `for` over `foreach` to avoid "changed during iteration" error
+		$drivers = Vector{};
+		for($i = 0; $i < $this->racetrack->count(); $i++) {
+			if(is_null($this->racetrack[$i]['driver']))
+				$this->racetrack[$i]['driver'] = $this->awaitify($this->racetrack[$i]['engine'])->getWaitHandle();
+			$drivers->add($this->racetrack[$i]['driver']);
+		}
+		/* HH_IGNORE_ERROR[4110] Limitation of typechecker with non-local assignment above, but no drivers can be null at this point */
+		return AwaitAllWaitHandle::fromVector($drivers);
 	}
 	
 	public function is_paused(): bool {
@@ -83,13 +83,14 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	protected function _attach(): void {
-		// I do want to reset the value, right?
-		foreach($this->racetrack as $k => $racecar) {
-			$this->racetrack[$k]['driver'] = async {
-				$driver = $racecar['driver'];
+		// MUST be plain `for` over `foreach` to avoid "changed during iteration" error
+		for($i = 0; $i < $this->racetrack->count(); $i++) {
+			/* HH_IGNORE_ERROR[4110] This is an AsyncFunctionWaitHandle | StaticWaitHandle, but type weakness makes it into an Awaitable */
+			$this->racetrack[$i]['driver'] = async {
+				$driver = $this->racetrack[$i]['driver'];
 				if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle()))
 					await $driver;
-				$awaited = $this->awaitify($racecar['engine']);
+				$awaited = $this->awaitify($this->racetrack[$i]['engine']);
 				await $awaited;
 			};
 		}
