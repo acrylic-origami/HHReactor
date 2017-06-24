@@ -27,7 +27,7 @@
 		"hhvm/systemlib-extractor": "^0.1.0",
 		"91carriage/phpunit-hhi": "~5.6",
 		"phpunit/phpunit": "~5.6",
-		"fredemmott/hack-error-suppressor": "dev-master as 1.0.1"
+		"hackpack/hackunit": "^1.1.0"
 	},
 	"repositories": [{
 		"type": "vcs",
