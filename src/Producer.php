@@ -10,7 +10,7 @@ newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable
  */
 class Producer<+T> extends BaseProducer<T> {
 	private Wrapper<?ConditionWaitHandle<mixed>> $bell;
-	private Vector<Racecar<T>> $racetrack;
+	private Vector<Racecar<T>> $racetrack = Vector{}; // this default prevents a race condition between initialization 
 	protected function __construct(Vector<(function(Appender<T>): AsyncIterator<T>)> $generator_factories) {
 		// If I want this to be protected but other BaseProducer-children to maybe have public constructors, then I've gotta do this in each one. Kind of a pain, but (shrug emoji)
 		$this->buffer = new Queue();
@@ -20,7 +20,7 @@ class Producer<+T> extends BaseProducer<T> {
 		
 		$this->bell = new Wrapper(null);
 		
-		$this->racetrack = $generator_factories->map(($factory) ==> shape('engine' => $factory(($iterator) ==> $this->_append($iterator)), 'driver' => null));
+		$this->racetrack = $this->racetrack->concat($generator_factories->map(($factory) ==> shape('engine' => $factory(($iterator) ==> $this->_append($iterator)), 'driver' => null)));
 	}
 	
 	public function sidechain(Awaitable<mixed> $incoming): void {
@@ -52,10 +52,12 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	public function get_iterator_edge(): WaitHandle<void> {
-		return voidify(\HH\Asio\v($this->racetrack->map(($racecar) ==> {
+		return voidify(\HH\Asio\v($this->racetrack->mapWithKey(($k, $racecar) ==> {
 			$driver = $racecar['driver'];
-			invariant(!is_null($driver), 'Implementation error: expected driving Awaitable to be set before `_produce`.');
-			return $driver;
+			if(is_null($driver))
+				return ($this->racetrack[$k]['driver'] = $this->awaitify($racecar['engine']));
+			else
+				return $driver;
 		})));
 	}
 	
@@ -479,23 +481,26 @@ class Producer<+T> extends BaseProducer<T> {
 	public function window(Producer<mixed> $signal): Producer<Producer<T>> {
 		$clone = clone $this;
 		$signal_clone = clone $signal;
+		$finished = new Wrapper(false);
 		return static::create_producer(async {
 			$i = new Wrapper(0);
 			do {
 				yield static::create(async {
 					$stashed_i = $i->get();
-					foreach(clone $clone await as $v) {
+					// NOTE LACK OF CLONE: producers yielded from here will race with each other for values. Order not guaranteed at boundary between windows.
+					foreach($clone await as $v) {
+						yield $v;
 						if($i->get() !== $stashed_i)
 							// the window has closed
 							// note: we'll keep producing on this window if the windower stops producing
 							return;
-						yield $v;
 					}
+					$finished->set(true);
 				});
-				$i->v++;
 				$next = await $signal_clone->next();
+				$i->v++;
 			}
-			while(!is_null($next)); // a more naive stop condition, but much more expressive
+			while(!is_null($next) && !$finished->get()); // a more naive stop condition, but much more expressive
 			// while($signal_clone->is_producing()); // this is more technically correct, but for now there isn't any difference here, and the former is easier to debug
 		});
 	}
