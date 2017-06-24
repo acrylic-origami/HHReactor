@@ -66,17 +66,20 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	private function _append(AsyncIterator<T> $incoming): void {
-		$bell = $this->bell->get();
-		if(!is_null($bell) && !\HH\Asio\has_finished($bell))
-			$bell->succeed(null);
-		
 		// hopefully the ordering of these instructions doesn't matter
 		// this check wouldn't be necessary if these were pure generators, because the generators couldn't call the extender before the first `next`.
 		
-		$driver = null;
-		if(true === $this->some_running->get()->get())
-			$driver = $this->awaitify($incoming);
-		$this->racetrack->add(shape('engine' => $incoming, 'driver' => $driver));
+		// try to avoid a race condition by deferring setting the `driver` for this iterator until resetting the bell; it won't be run outside of an `await` anyways.
+		// $driver = null;
+		// if(true === $this->some_running->get()->get())
+		// 	$driver = $this->awaitify($incoming); // theoretically, this could be a race condition, since we're calling an async function
+		
+		$this->racetrack->add(shape('engine' => $incoming, 'driver' => null));
+		
+		// ring the bell
+		$bell = $this->bell->get();
+		if(!is_null($bell) && !\HH\Asio\has_finished($bell))
+			$bell->succeed(null);
 	}
 	
 	protected function _attach(): void {
