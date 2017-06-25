@@ -237,13 +237,14 @@ When disposing of `Producer`s, there are two determining factors to the iterator
 
 1. When the first item is requested from a `Producer`, it begins "running".
 2. Each `Producer` knows the number of running clones.
-3. When the running count drops back to 0, the `Producer`:
+3. `detach`ing a running `Producer` decrements the running count.
+4. When the running count drops back to 0, the `Producer`:
 	1. Stops running its children;
 	2. stops buffering, and;
 	3. "detaches" from its child `Producer`s by decrementing their running refcounts.\*
 
-See 1. `Producer::_attach`; 2. `BaseProducer::running_count`, `BaseProducer::this_running`, `BaseProducer::some_running`; 3.1. `Producer::awaitify`; 3.2. `Producer::awaitify`; 3.3. `Producer::_detach`.
+See 1. `Producer::_attach`; 2. `BaseProducer::running_count`, `BaseProducer::this_running`, `BaseProducer::some_running`; 3.1. `Producer::awaitify`; 3.2. `Producer::awaitify`; 3.3. `Producer::detach`.
 
-<sup>\*A `Producer` knows it holds running references to all of its children because, as part of its setup routine, `Producer` must start iterating them all.</sup>
+<sup>\*A `Producer` knows it holds running references to all of its children because, as part of its attachment routine, `Producer` must start iterating them all.</sup>
 
 A `connection_factory` iterator wrapped by a `Producer` would stop _buffering_, but **it wouldn't close the TCP socket** until its _refcount_ drops to 0, so the system queue for that socket might begin to fill instead. Again, HHReactor leans on the garbage collector to close these sockets, and only when _all_ references to the `connection_factory` iterator are dropped (not just running ones).
