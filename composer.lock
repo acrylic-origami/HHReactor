@@ -99,16 +99,16 @@
         },
         {
             "name": "facebook/hhvm-autoload",
-            "version": "v1.3.0",
+            "version": "v1.3.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/hhvm/hhvm-autoload.git",
-                "reference": "39ecfe62b1f002b95b0a67cf73ae3da476d55570"
+                "reference": "7c998b32421b083837e810dd736b8cb092b52f22"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/hhvm/hhvm-autoload/zipball/39ecfe62b1f002b95b0a67cf73ae3da476d55570",
-                "reference": "39ecfe62b1f002b95b0a67cf73ae3da476d55570",
+                "url": "https://api.github.com/repos/hhvm/hhvm-autoload/zipball/7c998b32421b083837e810dd736b8cb092b52f22",
+                "reference": "7c998b32421b083837e810dd736b8cb092b52f22",
                 "shasum": ""
             },
             "require": {
@@ -139,7 +139,7 @@
                 ]
             },
             "notification-url": "https://packagist.org/downloads/",
-            "time": "2017-02-17T05:54:26+00:00"
+            "time": "2017-06-23T19:40:44+00:00"
         },
         {
             "name": "fredemmott/hack-error-suppressor",
@@ -1221,16 +1221,16 @@
         },
         {
             "name": "phpunit/phpunit",
-            "version": "5.7.20",
+            "version": "5.7.21",
             "source": {
                 "type": "git",
                 "url": "https://github.com/sebastianbergmann/phpunit.git",
-                "reference": "3cb94a5f8c07a03c8b7527ed7468a2926203f58b"
+                "reference": "3b91adfb64264ddec5a2dee9851f354aa66327db"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/sebastianbergmann/phpunit/zipball/3cb94a5f8c07a03c8b7527ed7468a2926203f58b",
-                "reference": "3cb94a5f8c07a03c8b7527ed7468a2926203f58b",
+                "url": "https://api.github.com/repos/sebastianbergmann/phpunit/zipball/3b91adfb64264ddec5a2dee9851f354aa66327db",
+                "reference": "3b91adfb64264ddec5a2dee9851f354aa66327db",
                 "shasum": ""
             },
             "require": {
@@ -1299,7 +1299,7 @@
                 "testing",
                 "xunit"
             ],
-            "time": "2017-05-22T07:42:55+00:00"
+            "time": "2017-06-21T08:11:54+00:00"
         },
         {
             "name": "phpunit/phpunit-mock-objects",

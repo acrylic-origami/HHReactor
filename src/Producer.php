@@ -4,7 +4,7 @@ use HHReactor\Asio\DelayedEmptyAsyncIterator;
 use HHReactor\Collection\EmptyAsyncIterator;
 use HHReactor\Collection\Queue;
 use function HHReactor\Asio\voidify;
-newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?WaitHandle<mixed>);
+newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable<mixed>);
 /**
  * An mergeable and shareable wrapper of multiple `AsyncIterator`.
  */
@@ -27,26 +27,32 @@ class Producer<+T> extends BaseProducer<T> {
 		$this->_append(new DelayedEmptyAsyncIterator($incoming));
 	}
 	
-	private async function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
+	/* HH_IGNORE_ERROR[4079] */
+	private function awaitify(AsyncIterator<T> $incoming): Awaitable<void> {
+		// eradicate all references to `$this` from the async block
 		$stashed_some_running = $this->some_running->get();
-		do {
-			$v = await \HH\Asio\wrap($incoming->next());
-			$bell = $this->bell->get();
-			if(!is_null($bell) && !\HH\Asio\has_finished($bell))
-				$bell->succeed(null);
-			
-			if($v->isFailed() || !is_null($v->getResult()))
-				/* HH_FIXME[4110] is_null on result not sufficient to refine ResultOrExceptionWrapper<?T> to ResultOrExceptionWrapper<T> */
-				$this->buffer->add($v);
-			
-			if($v->isFailed() || is_null($v->getResult()))
-				return; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
+		$bell_wrapper = $this->bell;
+		$buffer = $this->buffer;
+		return async {
+			do {
+				$v = await \HH\Asio\wrap($incoming->next());
+				$bell = $bell_wrapper->get();
+				if(!is_null($bell) && !\HH\Asio\has_finished($bell))
+					$bell->succeed(null);
 				
-			if(false === $stashed_some_running->get()) {
-				return;
+				if($v->isFailed() || !is_null($v->getResult()))
+					/* HH_FIXME[4110] is_null on result not sufficient to refine ResultOrExceptionWrapper<?T> to ResultOrExceptionWrapper<T> */
+					$buffer->add($v);
+				
+				if($v->isFailed() || is_null($v->getResult()))
+					break; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
+					
+				if(false === $stashed_some_running->get()) {
+					break;
+				}
 			}
-		}
-		while(!$v->isFailed() && !is_null($v));
+			while(!$v->isFailed() && !is_null($v));
+		};
 	}
 	
 	public function get_iterator_edge(): WaitHandle<void> {
@@ -54,10 +60,11 @@ class Producer<+T> extends BaseProducer<T> {
 		$drivers = Vector{};
 		for($i = 0; $i < $this->racetrack->count(); $i++) {
 			if(is_null($this->racetrack[$i]['driver']))
-				$this->racetrack[$i]['driver'] = $this->awaitify($this->racetrack[$i]['engine'])->getWaitHandle();
-			$drivers->add($this->racetrack[$i]['driver']);
+				$this->racetrack[$i]['driver'] = $this->awaitify($this->racetrack[$i]['engine']);
+			$driver = $this->racetrack[$i]['driver'];
+			invariant(!is_null($driver), 'Limitation of typechecker: although non-local, set to non-null value above.');
+			$drivers->add($driver->getWaitHandle());
 		}
-		/* HH_IGNORE_ERROR[4110] Limitation of typechecker with non-local assignment above, but no drivers can be null at this point */
 		return AwaitAllWaitHandle::fromVector($drivers);
 	}
 	
@@ -69,11 +76,11 @@ class Producer<+T> extends BaseProducer<T> {
 		// hopefully the ordering of these instructions doesn't matter
 		// this check wouldn't be necessary if these were pure generators, because the generators couldn't call the extender before the first `next`.
 		
-		// try to avoid a race condition by deferring setting the `driver` for this iterator until resetting the bell; it won't be run outside of an `await` anyways.
 		// $driver = null;
 		// if(true === $this->some_running->get()->get())
 		// 	$driver = $this->awaitify($incoming); // theoretically, this could be a race condition, since we're calling an async function
 		
+		// instead of the above, try to avoid a race condition by deferring setting the `driver` for this iterator until resetting the bell; it won't be run outside of an `await` anyways.
 		$this->racetrack->add(shape('engine' => $incoming, 'driver' => null));
 		
 		// ring the bell
@@ -82,29 +89,25 @@ class Producer<+T> extends BaseProducer<T> {
 			$bell->succeed(null);
 	}
 	
-	protected function _attach(): void {
+	protected async function _attach(): Awaitable<void> {
 		// MUST be plain `for` over `foreach` to avoid "changed during iteration" error
 		for($i = 0; $i < $this->racetrack->count(); $i++) {
-			/* HH_IGNORE_ERROR[4110] This is an AsyncFunctionWaitHandle | StaticWaitHandle, but type weakness makes it into an Awaitable */
-			$this->racetrack[$i]['driver'] = async {
-				$driver = $this->racetrack[$i]['driver'];
-				if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle()))
-					await $driver;
-				$awaited = $this->awaitify($this->racetrack[$i]['engine']);
-				await $awaited;
-			};
+			$driver = $this->racetrack[$i]['driver'];
+			if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle()))
+				await $driver;
 		}
 	}
 	
-	protected function _detach(): void {
-		parent::_detach();
+	<<__Override>>
+	public function detach(): void {
+		parent::detach();
 		
 		// detach from children iterators to conserve memory during pausing
 		if(false === $this->some_running->get()->get()) {
 			foreach($this->racetrack as $racecar) {
 				$engine = $racecar['engine'];
 				if($engine instanceof BaseProducer)
-					$engine->_detach();
+					$engine->detach();
 			}
 		}
 	}
@@ -121,11 +124,11 @@ class Producer<+T> extends BaseProducer<T> {
 			catch(\InvalidArgumentException $e) {
 				if($e->getMessage() !== 'ConditionWaitHandle not notified by its child')
 					throw $e;
-				else {
-					// if($this->some_running->get()) {
+				elseif($this->buffer->is_empty()) {
+					// if($some_running->get()) {
 					// 	// Assume that if the some_running flag is still set, the iterator just finished and this is the first `next` to know about it.
 					// 	// Assume that some_running would be unset by the __destruct-detach impl if this Producer was paused from orphaning
-					// 	$this->some_running->set(false);
+					// 	$some_running->set(false);
 					// }
 					return null; // either the generators are exhausted, or they aborted from orphaning. Either way, this iterator is finished as far as the calling scope is concerned: end the iterator
 				}
@@ -369,13 +372,11 @@ class Producer<+T> extends BaseProducer<T> {
 			await \HH\Asio\later();
 			$self_producer = $producer_wrapper->get();
 			invariant(!is_null($self_producer), 'By construction, this must by this point be set to this the producer wrapping this iterator.');
-			
 			// note: fail the trunk producer if this $clone value producer fails.
 			foreach($clone await as $v) {
 				foreach($keysmith($v) as $key) {
 					if(!$subjects->containsKey($key)) {
 						// add emittee
-						
 						$subjects->set($key, tuple(
 							ConditionWaitHandle::create(\HHReactor\Asio\lifetime(Vector{ clone $self_producer }, Vector{ \HH\Asio\later() })->getWaitHandle()),
 							new \SplQueue()

@@ -14,7 +14,7 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 		$this->buffer = clone $this->buffer;
 	}
 	
-	protected function _detach(): void {
+	public function detach(): void {
 		if($this->this_running) {
 			$this->running_count->v--;
 			if($this->running_count->get() === 0) {
@@ -22,18 +22,18 @@ abstract class BaseProducer<+T> implements AsyncIterator<T> {
 			}
 		}
 	}
-	abstract protected function _attach(): void;
+	abstract protected function _attach(): Awaitable<void>;
 	abstract protected function _produce(): Awaitable<?(mixed, T)>;
 	public function __destruct(): void {
 		// $this->refcount->v--;
-		$this->_detach();
+		$this->detach();
 	}
 	public async function next(): Awaitable<?(mixed, T)> {
 		if(!$this->this_running) {
 			$this->this_running = true;
 			if(!$this->some_running->get()->get()) {
 				$this->some_running->set(new Wrapper(true));
-				$this->_attach();
+				await $this->_attach();
 			}
 			$this->running_count->v++;
 		}

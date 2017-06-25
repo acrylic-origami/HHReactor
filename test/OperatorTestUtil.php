@@ -7,7 +7,6 @@ class OperatorTestUtil {
 		$left_array = is_array($left) ? $left : iterator_to_array($left);
 		$right_array = is_array($right) ? $right : iterator_to_array($right);
 		
-		
 		// canonicalize
 		sort($left_array);
 		sort($right_array);

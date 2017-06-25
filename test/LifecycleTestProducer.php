@@ -22,8 +22,8 @@ class LifecycleTestProducer<+T> extends Producer<T> {
 	}
 	
 	<<__Override>>
-	protected function _detach(): void {
-		parent::_detach();
+	public function detach(): void {
+		parent::detach();
 		$on_detach = $this->on_detach;
 		$on_detach();
 		if(!$this->some_running->get()->get()) {
@@ -33,8 +33,8 @@ class LifecycleTestProducer<+T> extends Producer<T> {
 	}
 	
 	<<__Override>>
-	protected function _attach(): void {
-		parent::_attach();
+	protected async function _attach(): Awaitable<void> {
+		await parent::_attach();
 		$on_attach = $this->on_attach;
 		$on_attach();
 	}
