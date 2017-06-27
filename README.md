@@ -1,4 +1,4 @@
-## HHReactor &mdash; cloneable, immutable streams and ReactiveX operators for strict Hack
+## HHReactor &mdash; _almost_ InteractiveX streams for strict Hack
 
 ```
 $ composer require hhreact/hhreactor
@@ -6,22 +6,22 @@ $ composer require hhreact/hhreactor
 
 ### Getting started
 
-#### The what: Cloning and ReactiveX transformations on [`AsyncGenerator`](https://docs.hhvm.com/hack/async/generators#sending-and-raising) and [`AsyncIterator`](https://docs.hhvm.com/hack/async/generators#async-iterators)
+#### The what
 
-Hack has `AsyncGenerator`: an asynchronous version of its generators which allows for `await`s between `yield`s and exposes asynchronous `next`, `send` and `raise` for `await`ing the next result. Hack also has a broader interface `AsyncIterator` which exposes just the generator's `next` method and allows custom classes to express async iterating behavior. They are both accepted by a `foreach(<$iterator> await as $v)` loop.
+If you know what **InteractiveX** is, HHReactor matches the InteractiveX philosophy closely, really only [straying significantly for the binding operators](#operators).
 
-Out of the box, they sound very promising for streaming usages, but they are limited in their simplicity; `foreach-await` is almost their only advertised use case. So, a wrapper over many streams can really only `concat` these streams, by successively iterating them in serial.
+If, alternatively, you know what **ReactiveX** is, InteractiveX is the "pull" analogue, where enumerables take the place of observables.
 
-With careful use of `ConditionWaitHandle`s, HHReactor's `Producer` is able to parallelize, expand and reduce streams, and so brings the rich suite of ReactiveX operators to Hack's async iterators. `Producer` is also designed to be minimally-intrusive: it fits the `AsyncIterator` signature down to a `+T` (emphasis on the covariance), it matches the behavior of the underlying iterators and it is almost stateless if no operators or cloning are applied.
+If you know what [`AsyncGenerator`](https://docs.hhvm.com/hack/async/generators#sending-and-raising) and [`AsyncIterator`](https://docs.hhvm.com/hack/async/generators#async-iterators) are, HHReactor lets you clone, reduce and expand async generators, and lets you enforce precise policies on buffering.
 
 #### In action
 
-```php
+```hack
 <?hh
 // Producer and connection_factory contain most of the functionality
-use HHReact\Producer; // *
-use function HHReact\HTTP\connection_factory; // **
-use HHReact\WebSocket\RFC6455;
+use HHReactor\Producer; // *
+use function HHReactor\HTTP\connection_factory; // **
+use HHReactor\WebSocket\RFC6455;
 
 \HH\Asio\join(async {
 
@@ -99,34 +99,51 @@ use HHReact\WebSocket\RFC6455;
 });
 ```
 
+#### The context (the sales pitch)
+
+Trying to bring ReactiveX thinking into Hack using its native [async-await](https://docs.hhvm.com/hack/async/introduction) and [asynchronous generators](https://docs.hhvm.com/hack/async/generators) proves unnatural because they advertise opposite control schemes: await-async gives control to the consuming scope to manage iteration, whereas ReactiveX employs callbacks to give the `Observable` the control over iteration. ReactiveX actually has a more obscure dual known as InteractiveX that replaces `IObservable` with `IEnumerable` and far better describes a Reactive approach in an async-await scheme. Bart De Smet gives [a cogent (and, judging by the lack of competition, authoritative) 55-minute presentation on InteractiveX considerations](https://channel9.msdn.com/Shows/Going+Deep/Bart-De-Smet-Interactive-Extensions-Ix), especially buffering in the final 15.
+
+Hack's async generators sound very promising out of the box for streaming usages since no setup is required: HHVM has a built-in, hidden scheduler. However, the generators they are limited in their simplicity; `foreach-await` is almost their only advertised use case. So, a wrapper over many streams can really only `concat` these streams, by successively iterating them in serial.
+
+With careful use of `ConditionWaitHandle`s, HHReactor's `Producer` is able to parallelize, expand and reduce streams, and so brings the rich suite of InteractiveX operators to Hack's async iterators. `Producer` is also designed to be minimally-intrusive: it fits the `AsyncIterator` signature down to a `+T` (emphasis on the covariance), it matches the behavior of the underlying iterators and it is almost stateless if no operators or cloning are applied.
+
 ### HHReactor: what's in the box
 
 - **`BaseProducer`**: manages cloning and accounting on running clones
-- **`Producer extends BaseProducer`**: ReactiveX operators and support for [arbitrary scheduling and higher-order iterators](#constructor). The &#x2B50; of the show
+- **`Producer extends BaseProducer`**: InteractiveX operators and support for [arbitrary scheduling and higher-order iterators](#constructor). The &#x2B50; of the show
 - **`connection_factory`**: listens on a TCP stream for HTTP requests, parses headers, and produces streams of the request bodies
 - **`Connection extends BaseProducer`**: Streams bodies from HTTP requests, and sends responses to clients
 
-### ReactiveX operators
+### <a name="operators"></a>Operators
 
-Most of the ReactiveX operators match the canonical signatures. The quickest way to scan the signatures is to [look at the reference documentation](#ref-doc).
+Most of the operators match the canonical InteractiveX/ReactiveX signatures. The quickest way to scan the signatures is to [look at the reference documentation](#ref-doc).
 
 Major discrepancies:
 
-1. [**`debounce` operator**](https://github.com/acrylic-origami/HHReactor/issues/1): not yet implemented due to technical challenges, but high on the priority list.
-2. **`defer` operator**: no strong motivation to implement it.
-3. **`never` operator**: non-terminating, lazy `Awaitable`s and `AsyncIterator`s are impossible in Hack (right now anyways; 2017-06-17)
-4. **Order preservation where natural**, e.g. in `map`, `reduce`, and `filter`. The Hack spec doesn't protect against extremely pathological race conditions, where the _single_ arc from an iterator yielding into a `Producer`'s buffer is overtaken by the cascade of arcs to restart the iterator from another scope, obtain the next value then put it in the shared buffer. As of HHVM 3.19, it doesn't look like the actual async implementation allows this, but without specification, order preservation sadly can't be guaranteed.
+1. **"Binding" operators &ndash; `share`, `memoize`, `publish`**: [these are replaced by cloning](#dynamics).
+2. [**`debounce` operator**](https://github.com/acrylic-origami/HHReactor/issues/1): not yet implemented due to technical challenges, but high on the priority list.
+3. **`defer` operator**: no strong motivation to implement it.
+4. **`never` operator**: non-terminating, lazy `Awaitable`s and `AsyncIterator`s are impossible in Hack (right now anyways; 2017-06-17)
+5. **Order preservation where natural**, e.g. in `map`, `reduce`, and `filter`. The Hack spec doesn't protect against extremely pathological race conditions, where the _single_ arc from an iterator yielding into a `Producer`'s buffer is overtaken by the cascade of arcs to restart the iterator from another scope, obtain the next value then put it in the shared buffer. As of HHVM 3.19, it doesn't look like the actual async implementation allows this, but without specification, order preservation sadly can't be guaranteed.
 
-### Properties of `Producer`
-
-For those familiar with `AsyncIterator`, `Producer<+T>` implements `AsyncIterator<T>`.
+### <a name="dynamics"></a> Dynamics of `Producer`
 
 If two or more scopes consume the same stream, they can either clone or not clone the `Producer`:
 
-1. **If the `Producer` is cloned**, the buffer is also cloned, so consumers will receive the same elements from the moment of cloning. In this way, clones act like ReactiveX's [`Replay`](http://reactivex.io/documentation/operators/replay.html). In the language of ReactiveX, cloning "cools" the `Producer` relative to not cloning.
-2. **If the `Producer` is not cloned**, consumers all share the same buffer, and hence they compete directly for values. This approaches the "hot" Observable concept in ReactiveX, differing only in their behavior if they are not yet started: `Producer` will not start iterating its children iterators until it is itself iterated, whereas hot Observables might be running and disposing values from their children.
+1. **[Ix's Memoize &amp; Publish] If the `Producer` is cloned**, the buffer is also cloned, so consumers will receive the same elements from the moment of cloning. In this way, clones act like InteractiveX's `Memoize` and ReactiveX's [`Replay`](http://reactivex.io/documentation/operators/replay.html).
 
-> **Behavioral note: All operators implicitly clone their operands to avoid competing with other operators or raw consumers for values.**
+  <img alt="Ix Memoize and Publish marble diagram" src="ix_memoize_publish_marbles.png" style="width:100%; max-width:1000px;" />
+
+  To emphasize: the clone doesn't see any elements produced by that `Producer` before the clone exists. In this way, `Memoize` and `Publish` behavior differ only in when/of what the consumer takes a clone. Cloning from a `Producer` that is never iterated will give `Memoize` behavior. Cloning moving `Producer`s will give `Publish` behavior.
+  
+  Note however that, because the consumer is in control of iteration, the underlying iterators aren't started until the first clone requests the first element.
+
+  > **Behavioral Note**: as [will be mentioned below too](#buffering), the buffer is managed like `Publish` rather than `Memoize`. `Producer` is very straightforward with deciding which nodes are reclaimed because it relies on the garbage collector: once the laggiest consumer advances, the node is reclaimed. It is then a simple and explicit matter of keeping or not keeping unstarted `Producer`s, which will or won't hold elements from the very beginning respectively.
+2. **[Ix's Share] If the `Producer` is not cloned**, consumers all share the same buffer, and hence they compete directly for values.
+
+  <img alt="Share marble diagram" src="ix_share_marbles.png" style="width:47%; max-width:470px;" />
+
+> **Behavioral note**: All operators implicitly clone their operands to avoid competing with other operators or raw consumers for values; they all implicitly `Publish`.
 
 ### <a name="httpserver"></a> HTTP Server
 
@@ -156,17 +173,11 @@ $ # View in browser at ./doc/index.html
 
 ### Details of `Producer`
 
-#### Why buffering? Timing.
+#### <a name="buffering"></a> Details of buffering
 
 The producing and consuming timelines are separated by a buffer and a notifying signal that tells the consumer there is at least one item in the queue. It works like a kitchen at a diner: the items are produced and queued, then a "bell" is rung to signal the worker to serve the items at their earliest convenience to the consumer.
 
 The signalling is so weak because timing and ordering rules in the Hack scheduler are correspondingly weak. Notably, if many `await` statements are queued in parallel and are ready to be resumed simultaneously, the Hack scheduler makes no guarantees about the order they'll be processed. `Producer`s `await` various iterators they hold, and the consumer `await`s the `Producer`; these are queued in parallel, which is subject to the weakness of the ordering rules. To implement `Producer` without a buffer, we would have to guarantee the consumer gets control right after any iterator under that `Producer` yields, which is unreliable in general.
-
-If you've peered at the source, this analogy is where the `$bell` property name comes from. In related fact, `Producer` name derives from the [producer-consumer problem](https://en.wikipedia.org/wiki/Producer%E2%80%93consumer_problem) which describes a very similar interaction.
-
-<!-- Clones of `Producer`s don't communicate between each other except in very indirect ways (notably consuming the semi-shared buffer, refcounts for resource management). As a result, none of the clones will know if -->
-
-#### Buffering
 
 `Producer` relies on the garbage collector to clear the buffer it accumulates from differences in consumption rates between consumers. As the laggiest consumers step their way through the buffer, their references to the earliest nodes of the buffer linked list are shed and the garbage collector clears these unreachable nodes.
 
@@ -192,11 +203,11 @@ Producer<T>::__construct(
 
 > **Friendly note:** the appending is signalled weakly through the same bell the values use, so iterators are not necessarily iterated immediately.
 
-`flat_map` uses this behavior the most directly &mdash; the main body of the operator must iterate the `Producer` in parallel with iterating the `AsyncIterator`s that are coming off of it as they arrive. That parallelization is accomplished with [the appending function](https://github.com/acrylic-origami/HHReactor/blob/1c9302cfe3574780a2e1531674998fa70bd26083/src/Producer.php#L360).
+`flat_map` uses this behavior the most directly &mdash; the main body of the operator must iterate the `Producer` in parallel with iterating the `AsyncIterator`s that are coming off of it as they arrive. [That parallelization is accomplished with the appending function](https://github.com/acrylic-origami/HHReactor/blob/1c9302cfe3574780a2e1531674998fa70bd26083/src/Producer.php#L360).
 
 Without using the appender, the constructor for the `Producer` will merge the value streams from the generating functions into a common output. `merge` is implemented [exactly that way](https://github.com/acrylic-origami/HHReactor/blob/1c9302cfe3574780a2e1531674998fa70bd26083/src/Producer.php#L647) in fact!
 
-> **Friendly note:** For higher-order `Producer`s like `Producer<Producer<T>>`, outer `Producer`s **will not** automatically clone the inner `Producer`s as they're yielded. This is less restrictive but could be surprising: clones of the outer producer will produce identical inner `Producer`s which will be **hot**, so their consumers will compete for values, even though the outer producer is cold.
+> **Friendly note:** For higher-order `Producer`s like `Producer<Producer<T>>`, outer `Producer`s **will not** automatically clone the inner `Producer`s as they're yielded. This is less restrictive but could be surprising: clones of the outer producer will produce identical inner `Producer`s which will be **`Share`d**, so their consumers will compete for values, even though the outer producer is cold.
 
 #### Running, pausing and exiting early
 
