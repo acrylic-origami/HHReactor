@@ -15,13 +15,12 @@ abstract class Connection extends Producer<string> {
 		private resource $stream
 	) {
 		parent::__construct(Vector{ async ($_) ==> {
-			for(
+			do {
 				$status = await stream_await($stream, STREAM_AWAIT_READ, 0.0);
-				$status === STREAM_AWAIT_READY;
-				$status = await stream_await($stream, STREAM_AWAIT_READ, 0.0)
-			) {
-				yield fread($stream, self::READ_BUFFER_SIZE);
+				if($status === STREAM_AWAIT_READ)
+					yield fread($stream, self::READ_BUFFER_SIZE);
 			}
+			while($status === STREAM_AWAIT_READ);
 				
 			if($status !== STREAM_AWAIT_CLOSED)
 				throw new \Exception('Stream failed.');
