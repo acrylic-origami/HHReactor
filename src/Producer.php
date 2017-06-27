@@ -45,10 +45,10 @@ class Producer<+T> extends BaseProducer<T> {
 					$buffer->add($v);
 				
 				if($v->isFailed() || is_null($v->getResult()))
-					break; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
+					return; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
 					
 				if(false === $stashed_some_running->get()) {
-					break;
+					return;
 				}
 			}
 			while(!$v->isFailed() && !is_null($v));
@@ -93,8 +93,10 @@ class Producer<+T> extends BaseProducer<T> {
 		// MUST be plain `for` over `foreach` to avoid "changed during iteration" error
 		for($i = 0; $i < $this->racetrack->count(); $i++) {
 			$driver = $this->racetrack[$i]['driver'];
-			if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle()))
+			if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle())) {
 				await $driver;
+				$this->racetrack[$i]['driver'] = null; // unset the driver to be reset by get_iterator_edge
+			}
 		}
 	}
 	
@@ -265,6 +267,8 @@ class Producer<+T> extends BaseProducer<T> {
 			foreach(clone $this await as $v) {
 				if($i++ < $n)
 					yield $v;
+				else
+					break;
 			}
 		});
 	}
@@ -650,7 +654,12 @@ class Producer<+T> extends BaseProducer<T> {
 	 * Note: `merge` has no ordering guarantees, especially between the iterators, and potentially even for items within a given iterator.
 	 */
 	public final static function merge(Vector<AsyncIterator<T>> $producers): Producer<T> {
-		return new self($producers->map(($producer) ==> ($_) ==> $producer));
+		return new self($producers->map(($producer) ==> ($_) ==> {
+			if($producer instanceof BaseProducer)
+				return clone $producer;
+			else
+				return $producer;
+		}));
 	}
 	/**
 	 * [Combine the emissions of multiple Producers together via a specified function and emit single items for each combination based on the results of this function.](http://reactivex.io/documentation/operators/zip.html)
