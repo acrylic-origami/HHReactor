@@ -4,8 +4,8 @@
 	"license": "MIT",
 	"authors": [
 		{
-			"name": "Dev",
-			"email": "dev@shufflr.io"
+			"name": "Derek Lam",
+			"email": "derek@lam.io"
 		}
 	],
 	"autoload": {
