@@ -4,7 +4,7 @@ use HHReactor\Asio\DelayedEmptyAsyncIterator;
 use HHReactor\Collection\EmptyAsyncIterator;
 use HHReactor\Collection\Queue;
 use function HHReactor\Asio\voidify;
-newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => ?Awaitable<mixed>);
+newtype Racecar<+T> = shape('engine' => AsyncIterator<T>, 'driver' => Wrapper<?Awaitable<mixed>>);
 /**
  * An mergeable and shareable wrapper of multiple `AsyncIterator`.
  */
@@ -20,7 +20,7 @@ class Producer<+T> extends BaseProducer<T> {
 		
 		$this->bell = new Wrapper(null);
 		
-		$this->racetrack = $this->racetrack->concat($generator_factories->map(($factory) ==> shape('engine' => $factory(($iterator) ==> $this->_append($iterator)), 'driver' => null)));
+		$this->racetrack = $this->racetrack->concat($generator_factories->map(($factory) ==> shape('engine' => $factory(($iterator) ==> $this->_append($iterator)), 'driver' => new Wrapper(null))));
 	}
 	
 	public function sidechain(Awaitable<mixed> $incoming): void {
@@ -43,15 +43,11 @@ class Producer<+T> extends BaseProducer<T> {
 				if($v->isFailed() || !is_null($v->getResult()))
 					/* HH_FIXME[4110] is_null on result not sufficient to refine ResultOrExceptionWrapper<?T> to ResultOrExceptionWrapper<T> */
 					$buffer->add($v);
-				
-				if($v->isFailed() || is_null($v->getResult()))
-					return; // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
 					
-				if(false === $stashed_some_running->get()) {
-					return;
-				}
+				if(false === $stashed_some_running->get())
+					return; // exit early from total detachment
 			}
-			while(!$v->isFailed() && !is_null($v));
+			while(!$v->isFailed() && !is_null($v->getResult())); // tempted to replace this with the uncaught exception to end the iterator, but that seems a bit... blunt?
 		};
 	}
 	
@@ -59,9 +55,9 @@ class Producer<+T> extends BaseProducer<T> {
 		// MUST be plain `for` over `foreach` to avoid "changed during iteration" error
 		$drivers = Vector{};
 		for($i = 0; $i < $this->racetrack->count(); $i++) {
-			if(is_null($this->racetrack[$i]['driver']))
-				$this->racetrack[$i]['driver'] = $this->awaitify($this->racetrack[$i]['engine']);
-			$driver = $this->racetrack[$i]['driver'];
+			if(is_null($this->racetrack[$i]['driver']->get()))
+				$this->racetrack[$i]['driver']->set($this->awaitify($this->racetrack[$i]['engine']));
+			$driver = $this->racetrack[$i]['driver']->get();
 			invariant(!is_null($driver), 'Limitation of typechecker: although non-local, set to non-null value above.');
 			$drivers->add($driver->getWaitHandle());
 		}
@@ -81,7 +77,7 @@ class Producer<+T> extends BaseProducer<T> {
 		// 	$driver = $this->awaitify($incoming); // theoretically, this could be a race condition, since we're calling an async function
 		
 		// instead of the above, try to avoid a race condition by deferring setting the `driver` for this iterator until resetting the bell; it won't be run outside of an `await` anyways.
-		$this->racetrack->add(shape('engine' => $incoming, 'driver' => null));
+		$this->racetrack->add(shape('engine' => $incoming, 'driver' => new Wrapper(null)));
 		
 		// ring the bell
 		$bell = $this->bell->get();
@@ -92,11 +88,14 @@ class Producer<+T> extends BaseProducer<T> {
 	protected async function _attach(): Awaitable<void> {
 		// MUST be plain `for` over `foreach` to avoid "changed during iteration" error
 		for($i = 0; $i < $this->racetrack->count(); $i++) {
-			$driver = $this->racetrack[$i]['driver'];
-			if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle())) {
-				await $driver;
-				$this->racetrack[$i]['driver'] = null; // unset the driver to be reset by get_iterator_edge
-			}
+			$driver_wrapper = $this->racetrack[$i]['driver'];
+			$driver = $driver_wrapper->get();
+			if(!is_null($driver) && !\HH\Asio\has_finished($driver->getWaitHandle()))
+				$this->racetrack[$i]['driver']->set(async {
+					await $driver;
+					await \HH\Asio\later(); // protect against eager driver; race condition setting wrapper
+					$driver_wrapper->set(null); // unset the driver to be reset by get_iterator_edge
+				});
 		}
 	}
 	
