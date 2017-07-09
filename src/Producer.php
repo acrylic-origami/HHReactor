@@ -218,7 +218,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Emit only those items from an Producer that pass a predicate test](http://reactivex.io/documentation/operators/filter.html)
+	 * [Emit only those items from a Producer that pass a predicate test](http://reactivex.io/documentation/operators/filter.html)
 	 * 
 	 * **Spec**:
 	 * - Order from the initial `Producer` is preserved in the return value.
@@ -255,7 +255,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [emit only the first _n_ items emitted by an Producer](http://reactivex.io/documentation/operators/take.html)
+	 * [emit only the first _n_ items emitted by a Producer](http://reactivex.io/documentation/operators/take.html)
 	 * 
 	 * **Specs**
 	 * - The return value may produce at most `$n` values, but must include all items produced since the beginning of the call or `$n` values, whichever is smaller.
@@ -273,7 +273,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Emit only the last item emitted by an Producer](http://reactivex.io/documentation/operators/last.html)
+	 * [Emit only the last item emitted by a Producer](http://reactivex.io/documentation/operators/last.html)
 	 * 
 	 * **Spec**: 
 	 * - The return value must not resolve sooner than the Producer throws an Exception or runs out of values. The return value may resolve at _any point_ afterwards, but must resolve eventually.
@@ -301,7 +301,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Apply a function to each item emitted by an Producer, sequentially, and emit the final value](http://reactivex.io/documentation/operators/reduce.html)
+	 * [Apply a function to each item emitted by a Producer, sequentially, and emit the final value](http://reactivex.io/documentation/operators/reduce.html)
 	 * 
 	 * **Spec**:
 	 *   - If there is exactly one value, then the returned `Awaitable` will resolve to `null`. Otherwise, all values produced after even the _beginning_ of the call must be combined and included in the return value in order of production in the source Producer.
@@ -313,7 +313,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Transform the items emitted by an Producer into Producers, then flatten the emissions from those into a single Producer](http://reactivex.io/documentation/operators/flatmap.html)
+	 * [Transform the items emitted by a Producer into Producers, then flatten the emissions from those into a single Producer](http://reactivex.io/documentation/operators/flatmap.html)
 	 * 
 	 * **Spec**:
 	 *   - `Tv`-typed items from the return value might not preserve the order they are produced in _separate_ Producers created by `$meta`.
@@ -343,7 +343,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Convert an Producer that emits Producers into a single Producer that emits the items emitted by the most-recently-emitted of those Producers](http://reactivex.io/documentation/operators/switch.html)
+	 * [Convert a Producer that emits Producers into a single Producer that emits the items emitted by the most-recently-emitted of those Producers](http://reactivex.io/documentation/operators/switch.html)
 	 * 
 	 * Note: by virtue of the limited Hack async spec, nothing is guaranteed about the ordering or timing of `switch`, although you can rely on it being close to the expected "perfect" behavior outlined by the ReactiveX documeentation.
 	 * @param $meta - Transform `T`-valued items to Producers. E.g. for `T := Producer<Tv>`, $meta may just be the identity function.
@@ -370,7 +370,7 @@ class Producer<+T> extends BaseProducer<T> {
 		);
 	}
 	/**
-	 * [Divide an Producer into a set of Producers that each emit a different subset of items from the original Producer.](http://reactivex.io/documentation/operators/groupby.html)
+	 * [Divide a Producer into a set of Producers that each emit a different subset of items from the original Producer.](http://reactivex.io/documentation/operators/groupby.html)
 	 * 
 	 * **Spec**:
 	 * - Any items produced after the beginning call in the original Producer must be produced by exactly one of the `this`-typed Producers in the return value.
@@ -431,7 +431,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Periodically gather items emitted by an Producer into bundles and emit these bundles rather than emitting the items one at a time.](http://reactivex.io/documentation/operators/buffer.html)
+	 * [Periodically gather items emitted by a Producer into bundles and emit these bundles rather than emitting the items one at a time.](http://reactivex.io/documentation/operators/buffer.html)
 	 * 
 	 * **Spec**:
 	 * - Any values produced by the original Producer after a call to `buffer` must be included in the return value.
@@ -506,7 +506,7 @@ class Producer<+T> extends BaseProducer<T> {
 	// }
 	
 	/**
-	 * [periodically subdivide items from an Producer into Producer windows and emit these windows rather than emitting the items one at a time](http://reactivex.io/documentation/operators/window.html)
+	 * [periodically subdivide items from a Producer into Producer windows and emit these windows rather than emitting the items one at a time](http://reactivex.io/documentation/operators/window.html)
 	 * 
 	 * Note: if the `$signal` ends prematurely (before the end of the source `Producer`), the items continue to be produced on the last window.
 	 * @param $signal - Produce a value whenever a new window opens.
@@ -540,7 +540,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Emit the most recent items emitted by an Producer within periodic time intervals](http://reactivex.io/documentation/operators/sample.html)
+	 * [Emit the most recent items emitted by a Producer within periodic time intervals](http://reactivex.io/documentation/operators/sample.html)
 	 * 
 	 * @param $signal - Produce a value whenever a new window opens.
 	 * @return - Produce the last value emitted during a window dictated by `$signal`.
@@ -569,7 +569,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Create an Producer that emits no items but terminates normally](http://reactivex.io/documentation/operators/empty-never-throw.html)
+	 * [Create a Producer that emits no items but terminates normally](http://reactivex.io/documentation/operators/empty-never-throw.html)
 	 * 
 	 * Note: very likely to, but _might_ not terminate immediately.
 	 */
@@ -578,7 +578,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Create an Producer that emits no items and terminates with an error](http://reactivex.io/documentation/operators/empty-never-throw.html)
+	 * [Create a Producer that emits no items and terminates with an error](http://reactivex.io/documentation/operators/empty-never-throw.html)
 	 */
 	public static function throw(\Exception $e): Producer<T> {
 		return new self(async {
@@ -586,7 +586,7 @@ class Producer<+T> extends BaseProducer<T> {
 		});
 	}
 	/**
-	 * [Create an Producer that emits a sequence of integers spaced by a given time interval](http://reactivex.io/documentation/operators/interval.html)
+	 * [Create a Producer that emits a sequence of integers spaced by a given time interval](http://reactivex.io/documentation/operators/interval.html)
 	 * 
 	 * Note: in extremely high-concurrency situations, this might get very inaccurate _and_ skewed.
 	 */
@@ -599,7 +599,7 @@ class Producer<+T> extends BaseProducer<T> {
 		});
 	}
 	/**
-	 * [create an Producer that emits a particular item](http://reactivex.io/documentation/operators/just.html)
+	 * [create a Producer that emits a particular item](http://reactivex.io/documentation/operators/just.html)
 	 * 
 	 * Note: very likely to, but _might_ not terminate immediately.
 	 */
@@ -609,7 +609,7 @@ class Producer<+T> extends BaseProducer<T> {
 		});
 	}
 	/**
-	 * [Create an Producer that emits a particular range of sequential integers](http://reactivex.io/documentation/operators/range.html)
+	 * [Create a Producer that emits a particular range of sequential integers](http://reactivex.io/documentation/operators/range.html)
 	 * 
 	 * Note: in a free `foreach-await` loop, this will _busy-wait_ until it ends or a parallel coroutine wakes up if ever
 	 */
@@ -622,7 +622,7 @@ class Producer<+T> extends BaseProducer<T> {
 		});
 	}
 	/**
-	 * [Create an Producer that emits a particular item multiple times](http://reactivex.io/documentation/operators/repeat.html)
+	 * [Create a Producer that emits a particular item multiple times](http://reactivex.io/documentation/operators/repeat.html)
 	 * 
 	 * Note: in a free `foreach-await` loop, this will _busy-wait_ until it ends or a parallel coroutine wakes up if ever
 	 * @param $v The value to repeat
@@ -637,7 +637,7 @@ class Producer<+T> extends BaseProducer<T> {
 		});
 	}
 	/**
-	 * [Create an Producer that emits a particular sqequence of items multiple times](http://reactivex.io/documentation/operators/repeat.html)
+	 * [Create a Producer that emits a particular sqequence of items multiple times](http://reactivex.io/documentation/operators/repeat.html)
 	 * 
 	 * Note: in a free `foreach-await` loop, this will _busy-wait_ until it ends or a parallel coroutine wakes up if ever
 	 * @param $v The value to repeat
@@ -654,7 +654,7 @@ class Producer<+T> extends BaseProducer<T> {
 		});
 	}
 	/**
-	 * [Create an Producer that emits a particular item after a given delay](http://reactivex.io/documentation/operators/timer.html)
+	 * [Create a Producer that emits a particular item after a given delay](http://reactivex.io/documentation/operators/timer.html)
 	 */
 	public final static function timer(T $v, int $delay): Producer<T> {
 		return static::create(async {
