@@ -85,7 +85,7 @@ class Producer<+T> extends BaseProducer<T> {
 			$bell->succeed(null);
 	}
 	
-	protected async function _attach(): Awaitable<void> {
+	protected function _attach(): void {
 		// MUST be plain `for` over `foreach` to avoid "changed during iteration" error
 		for($i = 0; $i < $this->racetrack->count(); $i++) {
 			$driver_wrapper = $this->racetrack[$i]['driver'];
@@ -100,15 +100,15 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	<<__Override>>
-	public function detach(): void {
-		parent::detach();
+	protected function _detach(): void {
+		parent::_detach();
 		
 		// detach from children iterators to conserve memory during pausing
 		if(false === $this->some_running->get()->get()) {
 			foreach($this->racetrack as $racecar) {
 				$engine = $racecar['engine'];
 				if($engine instanceof BaseProducer)
-					$engine->detach();
+					$engine->_detach();
 			}
 		}
 	}
