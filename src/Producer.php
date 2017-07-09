@@ -332,6 +332,16 @@ class Producer<+T> extends BaseProducer<T> {
 			}) }
 		);
 	}
+	
+	public function flatten_awaitables<Tv>((function(T): Awaitable<Tv>) $asynchronizer): Producer<Tv> {
+		// we have to work in iterator territory all the time, or else the machinery could be vastly simplified -- this is like from_awaitables, but the awaitables can come in over time
+		return (clone $this)->map(async ($v) ==> {
+			$awaitable_v = await $asynchronizer($v);
+			yield $awaitable_v;
+		})
+		                    ->flat_map(($pseudo_iterator) ==> Producer::create($pseudo_iterator));
+	}
+	
 	/**
 	 * [Convert an Producer that emits Producers into a single Producer that emits the items emitted by the most-recently-emitted of those Producers](http://reactivex.io/documentation/operators/switch.html)
 	 * 
@@ -437,12 +447,28 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	/**
-	 * [Only emit an item from an Producer if a particular timespan has passed without it emitting another item](http://reactivex.io/documentation/operators/debounce.html)
+	 * [Only emit an item from a Producer if a particular timespan has passed without it emitting another item](http://reactivex.io/documentation/operators/debounce.html)
 	 * 
 	 * **Spec**
 	 * - The last value of the original Producer, if there is one, must be produced in the return value.
 	 * @param $usecs - The "timespan" as described above, in microseconds.
 	 */
+	public function debounce(int $delay): Producer<T> {
+		$clone = clone $this;
+		return self::create(async {
+			$counter = new Wrapper(0);
+			$delayer = $clone->flatten_awaitables(async ($v) ==> {
+				$stashed_counter = ++$counter->v;
+				await \HH\Asio\usleep($delay);
+				return tuple($stashed_counter, $v);
+			});
+			foreach($delayer await as $delayed) {
+				if($delayed[0] === $counter->get())
+					yield $delayed[1];
+			}
+		});
+	}
+
 	
 	// public function debounce(int $usecs): Producer<T> {
 	// 	$clone = clone $this;
