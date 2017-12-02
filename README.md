@@ -107,6 +107,12 @@ Hack's async generators sound very promising out of the box for streaming usages
 
 With careful use of `ConditionWaitHandle`s, HHReactor's `Producer` is able to parallelize, expand and reduce streams, and so brings the rich suite of InteractiveX operators to Hack's async iterators. `Producer` is also designed to be minimally-intrusive: it fits the `AsyncIterator` signature down to a `+T` (emphasis on the covariance), it matches the behavior of the underlying iterators and it is almost stateless if no operators or cloning are applied.
 
+### <span style="color:#F00">\*</span> Compatibility with HHVM >3.23
+
+The maintainers of Hack have moved to [remove destructors from strict Hack entirely in coming releases](https://hhvm.com/blog/2017/11/17/hhvm-3-23.html) sometime in HHVM >3.23. HHReactor relies on eager refcounting and defines a custom destructor on BaseProducer for timing to work properly. Without a guarantee that the destructor will be called _at all_, Producer is bound to leak when it's paused, which is a critical, if not application-breaking bug.
+
+Hence, **I do not recommend running the current version (~1.0) of HHReactor on HHVM >3.23**. This will be a tough patch if it is even worth it, and the solution will probably involve manual disposal, which is much dirtier than the automatic disposal in place for HHVM <3.23.
+
 ### HHReactor: what's in the box
 
 - **`BaseProducer`**: manages cloning and accounting on running clones
@@ -250,11 +256,10 @@ When disposing of `Producer`s, there are two determining factors to the iterator
 2. Each `Producer` knows the number of running clones.
 3. `detach`ing a running `Producer` decrements the running count.
 4. When the running count drops back to 0, the `Producer`:
-	1. Stops running its children;
-	2. stops buffering, and;
-	3. "detaches" from its child `Producer`s by decrementing their running refcounts.\*
+	1. Stops running its children (which stops the buffer from growing) and
+	2. "detaches" from its child `Producer`s by decrementing their running refcounts.\*
 
-See 1. `Producer::_attach`; 2. `BaseProducer::running_count`, `BaseProducer::this_running`, `BaseProducer::some_running`; 3.1. `Producer::awaitify`; 3.2. `Producer::awaitify`; 3.3. `Producer::detach`.
+See 1. `Producer::_attach`; 2. `BaseProducer::running_count`, `BaseProducer::this_running`, `BaseProducer::some_running`; 3. `Producer::__destruct`; 4.1. `Producer::awaitify`; 4.2. `Producer::detach`.
 
 <sup>\*A `Producer` knows it holds running references to all of its children because, as part of its attachment routine, `Producer` must start iterating them all.</sup>
 
