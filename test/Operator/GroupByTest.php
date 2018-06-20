@@ -36,7 +36,7 @@ class GroupByTest {
 		await OperatorTestUtil::nested_hot_cold_value_assert(
 			$assert,
 			$producer,
-			[range(0, 10, 2), range(1, 9, 2)]
+			[range(0, 8, 2), range(1, 9, 2)]
 		);
 	}
 	

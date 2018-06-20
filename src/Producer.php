@@ -333,7 +333,7 @@ class Producer<+T> extends BaseProducer<T> {
 		);
 	}
 	
-	public function flatten_awaitables<Tv>((function(T): Awaitable<Tv>) $asynchronizer): Producer<Tv> {
+	public function map_async_unordered<Tv>((function(T): Awaitable<Tv>) $asynchronizer): Producer<Tv> {
 		// we have to work in iterator territory all the time, or else the machinery could be vastly simplified -- this is like from_awaitables, but the awaitables can come in over time
 		return (clone $this)->map(async ($v) ==> {
 			$awaitable_v = await $asynchronizer($v);
@@ -457,7 +457,7 @@ class Producer<+T> extends BaseProducer<T> {
 		$clone = clone $this;
 		return self::create(async {
 			$counter = new Wrapper(0);
-			$delayer = $clone->flatten_awaitables(async ($v) ==> {
+			$delayer = $clone->map_async_unordered(async ($v) ==> {
 				$stashed_counter = ++$counter->v;
 				await \HH\Asio\usleep($delay);
 				return tuple($stashed_counter, $v);
@@ -546,12 +546,8 @@ class Producer<+T> extends BaseProducer<T> {
 	 * @return - Produce the last value emitted during a window dictated by `$signal`.
 	 */
 	public function sample(Producer<mixed> $signal): Producer<?T> {
-		return static::create_producer(async {
-			foreach($this->window($signal) await as $producer) {
-				$v = await $producer->last();
-				yield $v;
-			}
-		});
+		return (clone $this)->window($signal)
+		                    ->map_async_unordered(meth_caller(Producer::class, 'last'));
 	}
 	
 	/**
@@ -571,7 +567,7 @@ class Producer<+T> extends BaseProducer<T> {
 	/**
 	 * [Create a Producer that emits no items but terminates normally](http://reactivex.io/documentation/operators/empty-never-throw.html)
 	 * 
-	 * Note: very likely to, but _might_ not terminate immediately.
+	 * Note: very likely to, but _might_ not, terminate immediately.
 	 */
 	public static function empty(): Producer<T> {
 		return static::create(new EmptyAsyncIterator());
@@ -637,7 +633,7 @@ class Producer<+T> extends BaseProducer<T> {
 		});
 	}
 	/**
-	 * [Create a Producer that emits a particular sqequence of items multiple times](http://reactivex.io/documentation/operators/repeat.html)
+	 * [Create a Producer that emits a particular sequence of items multiple times](http://reactivex.io/documentation/operators/repeat.html)
 	 * 
 	 * Note: in a free `foreach-await` loop, this will _busy-wait_ until it ends or a parallel coroutine wakes up if ever
 	 * @param $v The value to repeat

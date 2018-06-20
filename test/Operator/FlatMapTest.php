@@ -13,7 +13,7 @@ class FlatMapTest {
 		if(false)
 			yield null;
 	}
-	private static async function seequence_to_iterator<T>(Traversable<T> $sequence): AsyncIterator<T> {
+	private static async function sequence_to_iterator<T>(Traversable<T> $sequence): AsyncIterator<T> {
 		foreach($sequence as $value) {
 			await \HH\Asio\later();
 			yield $value;
@@ -22,13 +22,13 @@ class FlatMapTest {
 	private static async function nested_sequence_to_producer_iterator<T>(Traversable<Traversable<T>> $nested_sequence): AsyncIterator<Producer<T>> {
 		foreach($nested_sequence as $sequence) {
 			await \HH\Asio\later();
-			yield Producer::create(self::seequence_to_iterator($sequence));
+			yield Producer::create(self::sequence_to_iterator($sequence));
 		}
 	}
 	
 	<<Test>>
 	public async function test_short_sequences(Assert $assert): Awaitable<void> {
-		$nested_sequence = [ [ 1, 2 ], [ 3, 4 ]];
+		$nested_sequence = [ [ 1, 2 ], [ 3, 4 ] ];
 		$producer_iterator = self::nested_sequence_to_producer_iterator($nested_sequence);
 		await OperatorTestUtil::hot_cold_value_assert(
 			$assert,
@@ -98,7 +98,7 @@ class FlatMapTest {
 			}
 		};
 		$producer = Producer::create($iterator)
-		                    ->flat_map(($sequence) ==> Producer::create(self::seequence_to_iterator($sequence)));
+		                    ->flat_map(($sequence) ==> Producer::create(self::sequence_to_iterator($sequence)));
 	}
 	
 	<<Test>>
