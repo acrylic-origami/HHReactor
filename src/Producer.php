@@ -24,6 +24,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	public function sidechain(Awaitable<mixed> $incoming): void {
+		
 		$this->_append(new DelayedEmptyAsyncIterator($incoming));
 	}
 	
@@ -427,6 +428,7 @@ class Producer<+T> extends BaseProducer<T> {
 	}
 	
 	public function group_by<Tk as arraykey>((function(T): Tk) $keysmith): Producer<Producer<T>> {
+		
 		return $this->generalized_group_by(($v) ==> [ $keysmith($v) ]);
 	}
 	
@@ -451,21 +453,16 @@ class Producer<+T> extends BaseProducer<T> {
 	 * 
 	 * **Spec**
 	 * - The last value of the original Producer, if there is one, must be produced in the return value.
-	 * @param $usecs - The "timespan" as described above, in microseconds.
+	 * @param $delay - The "timespan" as described above, in microseconds.
 	 */
 	public function debounce(int $delay): Producer<T> {
-		$clone = clone $this;
-		return self::create(async {
-			$counter = new Wrapper(0);
-			$delayer = $clone->map_async_unordered(async ($v) ==> {
-				$stashed_counter = ++$counter->v;
-				await \HH\Asio\usleep($delay);
-				return tuple($stashed_counter, $v);
-			});
-			foreach($delayer await as $delayed) {
-				if($delayed[0] === $counter->get())
-					yield $delayed[1];
-			}
+		$counter = new Wrapper(0);
+		return (clone $this)->flat_map(async $v ==> {
+			$counter->set($counter->get() + 1);
+			$stashed_counter = $counter->get();
+			await \HH\Asio\usleep($delay);
+			if($stashed_counter === $counter->get())
+				yield $v;
 		});
 	}
 
@@ -570,6 +567,7 @@ class Producer<+T> extends BaseProducer<T> {
 	 * Note: very likely to, but _might_ not, terminate immediately.
 	 */
 	public static function empty(): Producer<T> {
+		
 		return static::create(new EmptyAsyncIterator());
 	}
 	
